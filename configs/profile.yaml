@@ -1,0 +1,37 @@
+# Template for runtime measurement and future profiling-related options.
+# The current shared implementation only uses lightweight always-on metrics
+# from src/metrics.py. Advanced profilers are intentionally not implemented yet.
+
+profile:
+  # Master switch for future trainer/evaluator code to decide whether to emit
+  # extra timing or profiling artifacts beyond the default shared metrics.
+  enabled: false
+
+  # Current shared code already reports wall-clock time, step time, throughput,
+  # and peak GPU memory. Keep this true unless a future script needs to disable
+  # runtime summaries explicitly.
+  collect_runtime_metrics: true
+
+  # Placeholder for future advanced profiler integrations, such as PyTorch
+  # profiler traces, Chrome traces, or memory timeline dumps.
+  # Suggested future values might include:
+  #   - none
+  #   - torch_profiler
+  #   - custom
+  profiler_backend: none
+
+  # Directory under a run folder where future profiling artifacts should go.
+  output_subdir: profiling
+
+  # Placeholder toggles for future fine-grained collection behavior.
+  record_shapes: false
+  profile_memory: false
+  with_stack: false
+  with_flops: false
+
+  # Placeholder schedule fields for future step-based profilers.
+  # These are not consumed by the current shared core.
+  wait_steps: 0
+  warmup_steps: 0
+  active_steps: 0
+  repeat: 1

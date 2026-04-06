@@ -1,0 +1,42 @@
+# Execution template for the non-distributed single-GPU path.
+# This file is intentionally lightweight and mostly documents what a
+# single-device run should override relative to configs/base.yaml.
+
+execution:
+  # Current intended path for later trainer wiring.
+  # Suggested future values might include: single_gpu, ddp, fsdp
+  mode: single_gpu
+
+  # Local process rank stays zero in a single-device run.
+  local_rank: 0
+
+  # Device id used when selecting a specific CUDA device in future scripts.
+  device_id: 0
+
+distributed:
+  # Explicitly disabled here because this config is for the baseline path.
+  enabled: false
+  backend: null
+
+model:
+  # Single-GPU runs can usually use bf16 when hardware supports it.
+  dtype: bf16
+  device: cuda:0
+
+dataloader:
+  # Conservative defaults for a 1.5B model on a single GPU.
+  train_batch_size: 4
+  eval_batch_size: 4
+  num_workers: 0
+  pin_memory: true
+
+training:
+  # Shared placeholders that later trainer implementations will consume.
+  num_epochs: 1
+  max_steps: null
+  gradient_accumulation_steps: 1
+
+runtime:
+  # Future execution-specific toggles can live here without polluting base.yaml.
+  compile_model: false
+  autocast: true

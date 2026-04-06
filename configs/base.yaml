@@ -1,0 +1,128 @@
+# Base shared configuration for GSM8K-style fine-tuning and evaluation.
+# This file is meant to stay method-agnostic and reusable across future
+# single-device, distributed, and PEFT experiments.
+
+# Global random seed used for dataset splitting and runtime reproducibility.
+seed: 42
+
+# Root directory where each run creates its own timestamped output folder.
+output_root: output
+
+# Optional explicit run name.
+# Leave as null to auto-generate a name from dataset, model, and seed.
+run_name: null
+
+model:
+  # Default base model used throughout this project.
+  name: Qwen/Qwen2.5-1.5B-Instruct
+
+  # Supported values in the shared loader: fp32, fp16, bf16.
+  dtype: bf16
+
+  # Leave null to auto-select cuda, then mps, then cpu.
+  device: null
+
+  # Keep false unless a future model choice explicitly requires remote code.
+  trust_remote_code: false
+
+  # Decoder cache should usually stay enabled for evaluation/generation.
+  # Future training code can override this if needed.
+  use_cache: true
+
+  # Shared tokenizer defaults.
+  padding_side: right
+  truncation_side: right
+
+data:
+  # Hugging Face dataset identifier for GSM8K.
+  dataset_name: gsm8k
+  dataset_config_name: main
+
+  # Raw download/cache location for Hugging Face Datasets.
+  cache_dir: data/raw
+
+  # Where processed project-formatted datasets are stored by prepare_data.py.
+  processed_dir: data/processed
+
+  # Optional path passed to load_from_disk for reusing a saved DatasetDict.
+  # Leave null to load directly from Hugging Face.
+  load_from_disk_path: null
+
+  # Standard split names used by the shared pipeline.
+  train_split: train
+  eval_split: validation
+  test_split: test
+
+  # If the source dataset does not ship a validation split, create one
+  # deterministically from the training set using this fraction and seed.
+  validation_size: 0.05
+  split_seed: 42
+
+  # Maximum token length used by tokenization and generation prompt encoding.
+  max_length: 512
+
+  # Keep this small by default for portability.
+  num_preprocessing_workers: 1
+
+  # Placeholder for future cache-control behavior in expanded pipelines.
+  overwrite_cache: false
+
+  # Reserved for future sequence packing experiments.
+  pack_to_max_length: false
+
+  # Append EOS after the answer when building causal LM labels.
+  append_eos_token: true
+
+  # Shared system prompt used to shape instruction-following behavior.
+  system_prompt: >-
+    You are a helpful math reasoning assistant. Solve the problem carefully and
+    end with a final answer.
+
+  # Shared instruction template applied to every GSM8K question.
+  instruction_template: |-
+    Solve the following math word problem. Show your reasoning before giving the final answer.
+
+    Question: {question}
+
+dataloader:
+  # Training and evaluation batch sizes for the shared setup layer.
+  train_batch_size: 4
+  eval_batch_size: 4
+
+  # DataLoader worker settings.
+  num_workers: 0
+  pin_memory: true
+
+optimizer:
+  # The current shared training setup initializes AdamW only.
+  # If other optimizers are added later, this field can become a selector.
+  name: adamw
+  lr: 2.0e-5
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+
+scheduler:
+  # The shared setup currently wires a Hugging Face scheduler by name.
+  name: linear
+  num_warmup_steps: 0
+
+training:
+  # These are shared placeholders for future trainer implementations.
+  num_epochs: 1
+  max_steps: null
+  gradient_accumulation_steps: 1
+
+generation:
+  # Deterministic generation defaults for evaluation.
+  max_new_tokens: 128
+  temperature: 0.0
+  top_p: 1.0
+  num_beams: 1
+  do_sample: false
+
+checkpoint:
+  # Shared checkpoint directory naming and best-metric selection.
+  dir_name: checkpoints
+  metric_name: accuracy
+  metric_mode: max

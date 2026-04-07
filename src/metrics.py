@@ -61,6 +61,9 @@ class RuntimeTracker:
     total_step_time_seconds: float = 0.0
     _run_start_time: Optional[float] = field(default=None, init=False, repr=False)
     _step_start_time: Optional[float] = field(default=None, init=False, repr=False)
+    _cuda_start_event: Optional[torch.cuda.Event] = field(default=None, init=False, repr=False)
+    _cuda_end_event: Optional[torch.cuda.Event] = field(default=None, init=False, repr=False)
+
 
     def start_run(self) -> None:
         self._run_start_time = time.perf_counter()
@@ -75,13 +78,25 @@ class RuntimeTracker:
         return self.total_runtime_seconds
 
     def start_step(self) -> None:
-        self._step_start_time = time.perf_counter()
+        if self.device and torch.device(self.device).type == "cuda":
+            torch.cuda.synchronize()
+            self._cuda_start_event = torch.cuda.Event(enable_timing=True)
+            self._cuda_end_event = torch.cuda.Event(enable_timing=True)
+            self._cuda_start_event.record()
+        else:
+            self._step_start_time = time.perf_counter()
 
     def end_step(self, samples: int = 0, tokens: int = 0) -> float:
-        if self._step_start_time is None:
-            raise RuntimeError("start_step() must be called before end_step().")
-        step_time = time.perf_counter() - self._step_start_time
-        self._step_start_time = None
+        if self.device and torch.device(self.device).type == "cuda":
+            self._cuda_end_event.record()
+            torch.cuda.synchronize()
+            step_time = self._cuda_start_event.elapsed_time(self._cuda_end_event) / 1000.0
+        else:
+            if self._step_start_time is None:
+                raise RuntimeError("start_step() must be called before end_step().")
+            step_time = time.perf_counter() - self._step_start_time
+            self._step_start_time = None
+        # ...existing stats update...
         self.total_steps += 1
         self.total_samples += int(samples)
         self.total_tokens += int(tokens)

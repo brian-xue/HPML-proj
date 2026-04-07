@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import random
+import re
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -74,6 +75,12 @@ def make_output_dir(
     return output_dir
 
 
+def _close_logger_handlers(logger: logging.Logger) -> None:
+    for handler in list(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
+
+
 def setup_logger(
     name: str,
     output_dir: Optional[str | Path] = None,
@@ -85,7 +92,7 @@ def setup_logger(
     logger.propagate = False
 
     if logger.handlers:
-        return logger
+        _close_logger_handlers(logger)
 
     formatter = logging.Formatter(
         fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -147,13 +154,31 @@ def save_json(data: Mapping[str, Any], path: str | Path) -> Path:
     path = Path(path)
     ensure_dir(path.parent)
     with path.open("w", encoding="utf-8") as handle:
-        json.dump(data, handle, indent=2, sort_keys=True)
+        json.dump(to_json_serializable(data), handle, indent=2, sort_keys=True)
     return path
 
 
 def load_json(path: str | Path) -> Dict[str, Any]:
     with Path(path).open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def to_json_serializable(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): to_json_serializable(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [to_json_serializable(item) for item in value]
+    if isinstance(value, tuple):
+        return [to_json_serializable(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, torch.Tensor):
+        return value.item() if value.ndim == 0 else value.detach().cpu().tolist()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (np.floating, np.integer)):
+        return value.item()
+    return value
 
 
 def deep_update(base: MutableMapping[str, Any], updates: Mapping[str, Any]) -> MutableMapping[str, Any]:
@@ -228,10 +253,58 @@ def chunked(items: Iterable[Any], chunk_size: int) -> Iterable[list[Any]]:
         yield chunk
 
 
+VERSION_PATTERN = re.compile(r"^v(\d+)$")
+
+
+def get_experiment_root(output_root: str | Path, experiment_name: str) -> Path:
+    return ensure_dir(Path(output_root) / sanitize_for_path(experiment_name))
+
+
+def list_versioned_run_dirs(experiment_root: str | Path) -> list[Path]:
+    root = Path(experiment_root)
+    versioned_dirs = []
+    for child in root.iterdir() if root.exists() else []:
+        if child.is_dir() and VERSION_PATTERN.match(child.name):
+            versioned_dirs.append(child)
+    return sorted(versioned_dirs, key=lambda path: int(VERSION_PATTERN.match(path.name).group(1)))
+
+
+def get_latest_version_dir(experiment_root: str | Path) -> Optional[Path]:
+    versioned_dirs = list_versioned_run_dirs(experiment_root)
+    return versioned_dirs[-1] if versioned_dirs else None
+
+
+def make_versioned_output_dir(output_root: str | Path, experiment_name: str) -> Path:
+    experiment_root = get_experiment_root(output_root, experiment_name)
+    latest_dir = get_latest_version_dir(experiment_root)
+    next_version = 1 if latest_dir is None else int(VERSION_PATTERN.match(latest_dir.name).group(1)) + 1
+    run_dir = experiment_root / f"v{next_version:03d}"
+    run_dir.mkdir(parents=True, exist_ok=False)
+    return run_dir
+
+
+def resolve_versioned_run_dir(
+    output_root: str | Path,
+    experiment_name: str,
+    version: Optional[str] = None,
+) -> Path:
+    experiment_root = get_experiment_root(output_root, experiment_name)
+    if version is None or version == "latest":
+        latest_dir = get_latest_version_dir(experiment_root)
+        if latest_dir is None:
+            raise FileNotFoundError(f"No versioned runs found for experiment: {experiment_name}")
+        return latest_dir
+
+    run_dir = experiment_root / version
+    if not run_dir.exists():
+        raise FileNotFoundError(f"Versioned run not found: {run_dir}")
+    return run_dir
+
+
 def default_config() -> Dict[str, Any]:
     return {
         "seed": 42,
-        "output_root": "outputs",
+        "output_root": "output",
         "run_name": None,
         "model": {
             "name": DEFAULT_MODEL_NAME,
@@ -239,6 +312,8 @@ def default_config() -> Dict[str, Any]:
             "device": None,
             "trust_remote_code": False,
             "use_cache": True,
+            "padding_side": "right",
+            "truncation_side": "right",
         },
         "data": {
             "dataset_name": "gsm8k",
@@ -280,6 +355,11 @@ def default_config() -> Dict[str, Any]:
             "num_epochs": 1,
             "max_steps": None,
             "gradient_accumulation_steps": 1,
+            "log_every_steps": 10,
+            "eval_every_steps": 200,
+            "save_every_steps": 200,
+            "save_at_end": True,
+            "resume_from": None,
         },
         "generation": {
             "max_new_tokens": 128,
@@ -287,6 +367,18 @@ def default_config() -> Dict[str, Any]:
             "top_p": 1.0,
             "num_beams": 1,
             "do_sample": False,
+        },
+        "peft": {
+            "enabled": False,
+            "method": "lora",
+            "task_type": "CAUSAL_LM",
+            "r": 16,
+            "lora_alpha": 32,
+            "lora_dropout": 0.05,
+            "bias": "none",
+            "target_modules": None,
+            "target_modules_strategy": "auto",
+            "modules_to_save": None,
         },
         "checkpoint": {
             "dir_name": "checkpoints",

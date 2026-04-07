@@ -12,6 +12,7 @@ from src.checkpoint import load_checkpoint
 from src.data import load_gsm8k_dataset, preprocess_dataset
 from src.evaluator import evaluate_generation
 from src.model import load_model_and_tokenizer
+from src.peft import apply_peft_to_model
 from src.utils import default_config, load_config, save_json, setup_logger
 
 
@@ -29,6 +30,9 @@ def main() -> None:
     logger = setup_logger("eval")
 
     model, tokenizer, device = load_model_and_tokenizer(config)
+    if config.get("peft", {}).get("enabled", False):
+        model, peft_metadata = apply_peft_to_model(model, config["peft"])
+        logger.info("Applied PEFT for evaluation with target modules: %s", peft_metadata.get("target_modules"))
     metadata = load_checkpoint(args.checkpoint, model=model, map_location=device)
     logger.info("Loaded checkpoint from %s", args.checkpoint)
     logger.info("Checkpoint metadata: %s", metadata)

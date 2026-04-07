@@ -13,6 +13,10 @@ def get_checkpoint_root(output_dir: str | Path, dir_name: str = "checkpoints") -
     return ensure_dir(Path(output_dir) / dir_name)
 
 
+def get_latest_checkpoint_metadata_path(output_dir: str | Path, dir_name: str = "checkpoints") -> Path:
+    return get_checkpoint_root(output_dir, dir_name=dir_name) / "latest_checkpoint.json"
+
+
 def build_checkpoint_dir(
     output_dir: str | Path,
     step: Optional[int] = None,
@@ -52,6 +56,14 @@ def save_checkpoint(
     }
     torch.save(state, checkpoint_dir / "training_state.pt")
     save_json(state["metadata"], checkpoint_dir / "metadata.json")
+    latest_metadata_path = get_latest_checkpoint_metadata_path(output_dir, dir_name=dir_name)
+    save_json({"checkpoint_dir": str(checkpoint_dir.resolve())}, latest_metadata_path)
+    if hasattr(model, "save_pretrained"):
+        adapter_dir = checkpoint_dir / "adapter"
+        try:
+            model.save_pretrained(adapter_dir)
+        except TypeError:
+            pass
     return checkpoint_dir
 
 
@@ -72,6 +84,17 @@ def load_checkpoint(
         scheduler.load_state_dict(state["scheduler"])
 
     return state.get("metadata", {})
+
+
+def get_latest_checkpoint_dir(output_dir: str | Path, dir_name: str = "checkpoints") -> Path:
+    latest_metadata_path = get_latest_checkpoint_metadata_path(output_dir, dir_name=dir_name)
+    if not latest_metadata_path.exists():
+        raise FileNotFoundError(f"Latest checkpoint metadata not found: {latest_metadata_path}")
+    metadata = load_json(latest_metadata_path)
+    checkpoint_dir = Path(metadata["checkpoint_dir"])
+    if not checkpoint_dir.exists():
+        raise FileNotFoundError(f"Latest checkpoint directory does not exist: {checkpoint_dir}")
+    return checkpoint_dir
 
 
 def maybe_save_best_checkpoint(

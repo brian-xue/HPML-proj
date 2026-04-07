@@ -18,7 +18,6 @@ Included:
 
 Not included yet:
 
-- PEFT-specific logic
 - Distributed training logic
 - Advanced profiler integrations
 - Trainer subclasses for single-device or distributed execution
@@ -92,6 +91,17 @@ Implements shared checkpoint handling:
 - saving metadata such as epoch and global step
 - loading checkpoints for resume or evaluation
 - tracking and copying the best checkpoint by metric
+- storing a latest-checkpoint pointer for resumable runs
+
+### `src/peft.py`
+
+Implements shared LoRA support:
+
+- config-driven LoRA wrapping via `peft`
+- auto-detection of target projection layers for Qwen-style models
+- support for explicit fixed `target_modules`
+- resolved target-module reporting for reproducible follow-up runs
+- trainable vs total parameter summaries
 
 ## Scripts Added
 
@@ -136,6 +146,16 @@ Shared result summarization script that:
 - aggregates them into JSON and CSV
 - summarizes accuracy, runtime, throughput, and peak memory
 
+### `scripts/run_lora_benchmark.py`
+
+Main editable benchmark runner for full GSM8K LoRA experiments:
+
+- holds a top-level `EXPERIMENTS` Python list
+- supports explicit `new` or `resume` modes per experiment
+- creates versioned run directories such as `v001`, `v002`, ...
+- applies LoRA and saves the resolved target-layer list
+- runs full training, checkpointing, resume, and evaluation
+
 ## Design Choices
 
 The implementation was kept intentionally simple and config-driven so later work can add PEFT, distributed execution, and trainer subclasses without major refactoring.
@@ -143,6 +163,8 @@ The implementation was kept intentionally simple and config-driven so later work
 Reusable logic lives in `src/`.
 Scripts in `scripts/` stay thin and orchestration-focused.
 The default model is consistently `Qwen/Qwen2.5-1.5B-Instruct`.
+LoRA target discovery is reproducible because the resolved target list is saved
+to each benchmark run and can be copied back into future explicit configs.
 
 ## Validation
 
@@ -205,6 +227,47 @@ If the smoke test succeeds, you should see:
 - The smoke test still requires network access the first time so Transformers
   can download the tiny model.
 - This is only a wiring/integration check, not a meaningful training run.
+
+## LoRA Benchmark Runs
+
+Use the benchmark runner for full GSM8K LoRA fine-tuning:
+
+```bash
+python3 scripts/run_lora_benchmark.py
+```
+
+The script is designed to be edited directly. Change the `EXPERIMENTS` list in
+`scripts/run_lora_benchmark.py` to add new presets, switch between `new` and
+`resume`, or pin a fixed `target_modules` list for later experiments.
+
+Each benchmark run writes a versioned directory under the experiment name, for
+example:
+
+- `output/qwen25_15b_lora_auto/v001/`
+- `output/qwen25_15b_lora_auto/v002/`
+
+Important run artifacts:
+
+- `config.yaml`
+- `resolved_peft_config.json`
+- `final_results.json`
+- `checkpoints/`
+- `run.log`
+
+When auto-detect mode is used, the exact resolved LoRA target list is:
+
+- printed to the console and run log
+- saved in `resolved_peft_config.json`
+- written back into `config.yaml`
+
+That saved `target_modules` list is meant to be copied into future experiments
+to lock the setting for reproducible benchmarks.
+
+To resume an unfinished run:
+
+1. Change the experiment entry in `EXPERIMENTS` to use `resume_mode: "resume"`.
+2. Set `resume_version` to a specific run such as `"v001"` or to `None`/`"latest"` for the newest version.
+3. Run the same script again.
 
 ## Next Steps
 

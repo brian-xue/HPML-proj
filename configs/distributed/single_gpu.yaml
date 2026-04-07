@@ -35,6 +35,11 @@ training:
   num_epochs: 1
   max_steps: null
   gradient_accumulation_steps: 1
+  log_every_steps: 10
+  eval_every_steps: 200
+  save_every_steps: 200
+  save_at_end: true
+  resume_from: null
 
 runtime:
   # Future execution-specific toggles can live here without polluting base.yaml.

@@ -47,12 +47,12 @@ def load_model(
     device: Optional[torch.device] = None,
 ) -> torch.nn.Module:
     model_name = config.get("name", DEFAULT_MODEL_NAME)
-    torch_dtype = resolve_torch_dtype(config.get("dtype"))
+    dtype = resolve_torch_dtype(config.get("dtype"))
     target_device = device or get_device(config.get("device"))
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch_dtype,
+        torch_dtype=dtype,
         trust_remote_code=bool(config.get("trust_remote_code", False)),
     )
     model.config.use_cache = bool(config.get("use_cache", True))

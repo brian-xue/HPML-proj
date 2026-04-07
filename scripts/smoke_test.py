@@ -4,9 +4,11 @@ import argparse
 import shutil
 import sys
 from pathlib import Path
+import math
 
 import torch
 from datasets import Dataset, DatasetDict
+from datasets import load_dataset
 from transformers import get_scheduler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +61,32 @@ def build_synthetic_dataset() -> DatasetDict:
             "test": Dataset.from_dict(eval_examples),
         }
     )
+def build_gsm8k_subset_dataset(n: int = 100) -> DatasetDict:
+    ds = load_dataset("gsm8k", "main")
+    train_n = min(n, len(ds["train"]))
+    test_n = min(n, len(ds["test"]))
+
+    train_subset = ds["train"].select(range(train_n))
+    test_subset = ds["test"].select(range(test_n))
+
+    return DatasetDict(
+        {
+            "train": train_subset,
+            "validation": test_subset,  # 用 test 前100做验证
+            "test": test_subset,
+        }
+    )
+
+
+def save_gsm8k_subset(output_dir: Path, n: int = 100) -> Path:
+    dataset_dir = ensure_dir(output_dir / f"gsm8k_first_{n}")
+    if dataset_dir.exists():
+        shutil.rmtree(dataset_dir)
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+
+    dataset = build_gsm8k_subset_dataset(n=n)
+    dataset.save_to_disk(str(dataset_dir))
+    return dataset_dir
 
 
 def save_synthetic_dataset(output_dir: Path) -> Path:
@@ -80,6 +108,14 @@ def build_optimizer(model, config):
         eps=float(optimizer_config.get("eps", 1e-8)),
         weight_decay=float(optimizer_config.get("weight_decay", 0.0)),
     )
+def _sanitize_for_json(obj):
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
+    return obj
 
 
 def main() -> None:
@@ -88,13 +124,13 @@ def main() -> None:
     output_dir = ensure_dir(args.output_dir)
     logger = setup_logger("smoke_test", output_dir=output_dir)
 
-    dataset_path = save_synthetic_dataset(output_dir)
+    dataset_path = save_gsm8k_subset(output_dir, n=100)
 
     # The smoke test uses a tiny public model and CPU-friendly settings so the
     # shared pipeline can be verified quickly without the full Qwen checkpoint.
     config["model"]["name"] = args.model_name
-    config["model"]["dtype"] = "fp32"
-    config["model"]["device"] = "cpu"
+    config["model"]["dtype"] = "bf16"
+    config["model"]["device"] = "cuda"
     config["model"]["use_cache"] = True
     config["data"]["load_from_disk_path"] = str(dataset_path)
     config["data"]["max_length"] = 128
@@ -103,7 +139,7 @@ def main() -> None:
     config["dataloader"]["eval_batch_size"] = 2
     config["dataloader"]["num_workers"] = 0
     config["training"]["num_epochs"] = 1
-    config["training"]["max_steps"] = 2
+    config["training"]["max_steps"] = 20
     config["training"]["gradient_accumulation_steps"] = 1
     config["training"]["log_every_steps"] = 1
     config["generation"]["max_new_tokens"] = 16
@@ -139,7 +175,8 @@ def main() -> None:
     )
     results = trainer.train()
 
-    save_json(results, output_dir / "smoke_test_results.json")
+    safe_results = _sanitize_for_json(results)
+    save_json(safe_results, output_dir / "smoke_test_results.json")
     logger.info("Smoke test finished successfully.")
     logger.info("Results saved to %s", output_dir / "smoke_test_results.json")
 

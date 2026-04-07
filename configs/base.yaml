@@ -112,6 +112,11 @@ training:
   num_epochs: 1
   max_steps: null
   gradient_accumulation_steps: 1
+  log_every_steps: 10
+  eval_every_steps: 200
+  save_every_steps: 200
+  save_at_end: true
+  resume_from: null
 
 generation:
   # Deterministic generation defaults for evaluation.
@@ -120,6 +125,33 @@ generation:
   top_p: 1.0
   num_beams: 1
   do_sample: false
+
+peft:
+  # Shared PEFT block. Set enabled=true for LoRA experiments.
+  enabled: false
+
+  # Currently only LoRA is implemented in the shared codebase.
+  method: lora
+
+  # PEFT task type for causal language modeling.
+  task_type: CAUSAL_LM
+
+  # Standard LoRA hyperparameters.
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+
+  # If provided, this exact list is used as the fixed target setting.
+  # This is the field to pin once auto-detect has printed/saved the layers
+  # you want to reuse in later experiments.
+  target_modules: null
+
+  # Default discovery mode used when target_modules is null.
+  target_modules_strategy: auto
+
+  # Optional list of extra modules to keep trainable and save with adapters.
+  modules_to_save: null
 
 checkpoint:
   # Shared checkpoint directory naming and best-metric selection.

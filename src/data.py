@@ -49,10 +49,18 @@ def format_gsm8k_example(
         {"role": "user", "content": prompt_text},
     ]
 
-    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
-        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    if tokenizer is not None and getattr(tokenizer, "chat_template", None):
+        prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
         full_messages = messages + [{"role": "assistant", "content": response_text}]
-        full_text = tokenizer.apply_chat_template(full_messages, tokenize=False, add_generation_prompt=False)
+        full_text = tokenizer.apply_chat_template(
+            full_messages,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
     else:
         prompt = f"System: {system_prompt}\nUser: {prompt_text}\nAssistant: "
         full_text = prompt + response_text
@@ -168,23 +176,31 @@ class CausalLMCollator:
     pad_to_multiple_of: Optional[int] = None
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
-        labels = [feature.pop("labels") for feature in features]
+        labels = [feature["labels"] for feature in features]
+    
+        pad_features = [
+            {
+                "input_ids": feature["input_ids"],
+                "attention_mask": feature["attention_mask"],
+            }
+            for feature in features
+        ]
+    
         batch = self.tokenizer.pad(
-            features,
+            pad_features,
             padding=True,
             pad_to_multiple_of=self.pad_to_multiple_of,
             return_tensors="pt",
         )
-
+    
         max_length = batch["input_ids"].shape[1]
         padded_labels = []
         for label in labels:
             padded = label + [self.label_pad_token_id] * (max_length - len(label))
             padded_labels.append(padded[:max_length])
-
+    
         batch["labels"] = torch.tensor(padded_labels, dtype=torch.long)
         return batch
-
 
 def build_dataloader(
     dataset: Dataset,

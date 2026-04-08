@@ -1,4 +1,8 @@
 from __future__ import annotations
+from src.utils import default_config, ensure_dir, load_config, save_json, set_random_seed, setup_logger
+from src.trainer_base import BaseTrainer
+from src.model import load_model_and_tokenizer
+from src.data import build_dataloaders
 
 import argparse
 import shutil
@@ -15,16 +19,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data import build_dataloaders
-from src.model import load_model_and_tokenizer
-from src.trainer_base import BaseTrainer
-from src.utils import default_config, ensure_dir, load_config, save_json, set_random_seed, setup_logger
-
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a lightweight end-to-end smoke test.")
+    parser = argparse.ArgumentParser(
+        description="Run a lightweight end-to-end smoke test.")
     parser.add_argument("--config", type=str, default="configs/base.yaml")
-    parser.add_argument("--model-name", type=str, default="sshleifer/tiny-gpt2")
+    parser.add_argument("--model-name", type=str,
+                        default="Qwen/Qwen3-4B-Instruct")
     parser.add_argument("--output-dir", type=str, default="output/smoke_test")
     return parser.parse_args()
 
@@ -61,6 +62,8 @@ def build_synthetic_dataset() -> DatasetDict:
             "test": Dataset.from_dict(eval_examples),
         }
     )
+
+
 def build_gsm8k_subset_dataset(n: int = 100) -> DatasetDict:
     ds = load_dataset("gsm8k", "main")
     train_n = min(n, len(ds["train"]))
@@ -108,6 +111,8 @@ def build_optimizer(model, config):
         eps=float(optimizer_config.get("eps", 1e-8)),
         weight_decay=float(optimizer_config.get("weight_decay", 0.0)),
     )
+
+
 def _sanitize_for_json(obj):
     if isinstance(obj, dict):
         return {k: _sanitize_for_json(v) for k, v in obj.items()}

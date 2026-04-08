@@ -72,6 +72,8 @@ class BaseTrainer:
         self.state = TrainerState()
         self.runtime = RuntimeTracker(device=device)
         self._grad_accum_counter = 0
+        self._log_interval_tokens = 0
+        self._log_interval_step_time_s = 0.0
 
     @property
     def training_config(self) -> Mapping[str, Any]:
@@ -166,24 +168,36 @@ class BaseTrainer:
 
             self.runtime.start_step()
             step_metrics = self.training_step(batch)
-            self.runtime.end_step(samples=batch_size, tokens=token_count)
+            step_time_s = self.runtime.end_step(samples=batch_size, tokens=token_count)
+            self._log_interval_tokens += token_count
+            self._log_interval_step_time_s += step_time_s
 
             epoch_loss += step_metrics["loss"]
             steps_in_epoch += 1
 
             if step_metrics["optimizer_stepped"] and self.should_log():
+                interval_tok_s = (
+                    self._log_interval_tokens / self._log_interval_step_time_s
+                    if self._log_interval_step_time_s > 0
+                    else 0.0
+                )
                 gpu_mem = None
                 if self.device.type == "cuda" and torch.cuda.is_available():
                     gpu_mem = torch.cuda.memory_allocated(self.device) / (1024 ** 2)
+                    reserved_mem = torch.cuda.memory_reserved(self.device) / (1024 ** 2)
+                    max_gpu_mem = torch.cuda.max_memory_allocated(self.device) / (1024 ** 2)
                     self.logger.info(
-                        "epoch=%s step=%s %s gpu_mem=%.2fMB",
+                        "epoch=%s step=%s %s gpu_mem=%.2fMB reserved_mem=%.2fMB max_gpu_mem=%.2fMB",
                         epoch,
                         self.state.global_step,
                         format_metrics(
                             {
                                 "loss": step_metrics["loss"],
                                 "avg_step_time_s": self.runtime.average_step_time_seconds,
+                                "tok_s": interval_tok_s,
                                 "gpu_mem": gpu_mem if gpu_mem is not None else 0.0,
+                                "reserved_mem": reserved_mem if reserved_mem is not None else 0.0,
+                                "max_gpu_mem": max_gpu_mem if max_gpu_mem is not None else 0.0,
                             }
                         ),
                     )
@@ -196,9 +210,13 @@ class BaseTrainer:
                             {
                                 "loss": step_metrics["loss"],
                                 "avg_step_time_s": self.runtime.average_step_time_seconds,
+                                "tok_s": interval_tok_s,
                             }
                         ),
                     )
+
+                self._log_interval_tokens = 0
+                self._log_interval_step_time_s = 0.0
 
             if step_metrics["optimizer_stepped"] and self.should_evaluate():
                 eval_results = self.evaluate()

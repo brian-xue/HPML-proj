@@ -48,11 +48,11 @@ EXPERIMENTS = [
                 "save_at_end": True,
             },
             "dataloader": {
-                "train_batch_size": 4,
-                "eval_batch_size": 4,
+                "train_batch_size": 8,
+                "eval_batch_size": 8,
             },
             "optimizer": {
-                "lr": 2e-4,
+                "lr": 5e-5,
                 "weight_decay": 0.0,
             },
             "peft": {
@@ -63,8 +63,8 @@ EXPERIMENTS = [
                 "lora_alpha": 32,
                 "lora_dropout": 0.05,
                 "bias": "none",
-                "target_modules": None,
-                "target_modules_strategy": "auto",
+                "target_modules": ["q_proj", "v_proj"],
+                "target_modules_strategy": None,
                 "modules_to_save": None,
             },
         },

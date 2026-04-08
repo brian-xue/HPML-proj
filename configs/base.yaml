@@ -59,7 +59,7 @@ data:
   split_seed: 42
 
   # Maximum token length used by tokenization and generation prompt encoding.
-  max_length: 512
+  max_length: 256
 
   # Keep this small by default for portability.
   num_preprocessing_workers: 1
@@ -86,8 +86,8 @@ data:
 
 dataloader:
   # Training and evaluation batch sizes for the shared setup layer.
-  train_batch_size: 4
-  eval_batch_size: 4
+  train_batch_size: 8
+  eval_batch_size: 8
 
   # DataLoader worker settings.
   num_workers: 0
@@ -113,8 +113,8 @@ training:
   max_steps: null
   gradient_accumulation_steps: 1
   log_every_steps: 10
-  eval_every_steps: 200
-  save_every_steps: 200
+  eval_every_steps: 500
+  save_every_steps: 500
   save_at_end: true
   resume_from: null
 

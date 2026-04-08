@@ -222,29 +222,32 @@ If the smoke test succeeds, you should see:
 
 ### Notes
 
-- The default smoke test uses `sshleifer/tiny-gpt2` instead of Qwen so it can
-  run quickly and cheaply.
+- The smoke test defaults to the project model (see `configs/base.yaml`), but you can
+  override `--model-name` to use something smaller (e.g. `sshleifer/tiny-gpt2`) for a quicker wiring check.
 - The smoke test still requires network access the first time so Transformers
-  can download the tiny model.
+  can download the model.
 - This is only a wiring/integration check, not a meaningful training run.
 
-## LoRA Benchmark Runs
+## Benchmark Runs
 
-Use the benchmark runner for full GSM8K LoRA fine-tuning:
+Benchmark experiments are intended to be run as standalone Python entrypoints under `experiments/`.
+
+Run the LoRA benchmark:
 
 ```bash
-python3 scripts/run_lora_benchmark.py
+python3 experiments/lora_benchmark.py
 ```
 
-The script is designed to be edited directly. Change the `EXPERIMENTS` list in
-`scripts/run_lora_benchmark.py` to add new presets, switch between `new` and
-`resume`, or pin a fixed `target_modules` list for later experiments.
+Dry-run (validate and print the resolved output directory without training):
 
-Each benchmark run writes a versioned directory under the experiment name, for
-example:
+```bash
+python3 experiments/lora_benchmark.py --dry-run
+```
 
-- `output/qwen25_15b_lora_auto/v001/`
-- `output/qwen25_15b_lora_auto/v002/`
+Each run writes a versioned directory under the experiment name, for example:
+
+- `output/lora_benchmark/v001/`
+- `output/lora_benchmark/v002/`
 
 Important run artifacts:
 
@@ -254,7 +257,7 @@ Important run artifacts:
 - `checkpoints/`
 - `run.log`
 
-When auto-detect mode is used, the exact resolved LoRA target list is:
+When LoRA auto-detect mode is used, the resolved LoRA target list is:
 
 - printed to the console and run log
 - saved in `resolved_peft_config.json`
@@ -263,11 +266,13 @@ When auto-detect mode is used, the exact resolved LoRA target list is:
 That saved `target_modules` list is meant to be copied into future experiments
 to lock the setting for reproducible benchmarks.
 
-To resume an unfinished run:
+To resume an unfinished run, set the experiment spec `run.mode: resume` and
+optionally set `run.resume_version` to `latest` or a specific `v###`.
 
-1. Change the experiment entry in `EXPERIMENTS` to use `resume_mode: "resume"`.
-2. Set `resume_version` to a specific run such as `"v001"` or to `None`/`"latest"` for the newest version.
-3. Run the same script again.
+### Backwards compatibility
+
+`scripts/run_lora_benchmark.py` still exists as a deprecated wrapper that runs
+`experiments/lora_benchmark.py`.
 
 ## Next Steps
 
@@ -275,5 +280,5 @@ The codebase is now ready for the next layer of work, such as:
 
 - implementing the actual shared training loop base
 - adding trainer subclasses for single-device and distributed paths
-- integrating PEFT methods
+- adding additional PEFT methods (QLoRA, GoRA)
 - adding more advanced profiling and experiment tracking

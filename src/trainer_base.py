@@ -172,17 +172,33 @@ class BaseTrainer:
             steps_in_epoch += 1
 
             if step_metrics["optimizer_stepped"] and self.should_log():
-                self.logger.info(
-                    "epoch=%s step=%s %s",
-                    epoch,
-                    self.state.global_step,
-                    format_metrics(
-                        {
-                            "loss": step_metrics["loss"],
-                            "avg_step_time_s": self.runtime.average_step_time_seconds,
-                        }
-                    ),
-                )
+                gpu_mem = None
+                if self.device.type == "cuda" and torch.cuda.is_available():
+                    gpu_mem = torch.cuda.memory_allocated(self.device) / (1024 ** 2)
+                    self.logger.info(
+                        "epoch=%s step=%s %s gpu_mem=%.2fMB",
+                        epoch,
+                        self.state.global_step,
+                        format_metrics(
+                            {
+                                "loss": step_metrics["loss"],
+                                "avg_step_time_s": self.runtime.average_step_time_seconds,
+                                "gpu_mem": gpu_mem if gpu_mem is not None else 0.0,
+                            }
+                        ),
+                    )
+                else:
+                    self.logger.info(
+                        "epoch=%s step=%s %s",
+                        epoch,
+                        self.state.global_step,
+                        format_metrics(
+                            {
+                                "loss": step_metrics["loss"],
+                                "avg_step_time_s": self.runtime.average_step_time_seconds,
+                            }
+                        ),
+                    )
 
             if step_metrics["optimizer_stepped"] and self.should_evaluate():
                 eval_results = self.evaluate()

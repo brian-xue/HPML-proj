@@ -187,7 +187,7 @@ class BaseTrainer:
                     reserved_mem = torch.cuda.memory_reserved(self.device) / (1024 ** 2)
                     max_gpu_mem = torch.cuda.max_memory_allocated(self.device) / (1024 ** 2)
                     self.logger.info(
-                        "epoch=%s step=%s %s gpu_mem=%.2fMB reserved_mem=%.2fMB max_gpu_mem=%.2fMB",
+                        "epoch=%s step=%s %s",
                         epoch,
                         self.state.global_step,
                         format_metrics(

@@ -42,6 +42,14 @@ def answers_match(prediction: str, reference: str) -> bool:
     return pred_norm == ref_norm
 
 
+def limit_dataset(dataset: Any, max_examples: Optional[int]) -> Any:
+    if max_examples is None:
+        return dataset
+    if max_examples <= 0:
+        raise ValueError("max_examples must be a positive integer when provided.")
+    return dataset.select(range(min(max_examples, len(dataset))))
+
+
 @torch.inference_mode()
 def evaluate_generation(
     model: torch.nn.Module,
@@ -131,3 +139,32 @@ def evaluate_generation(
         "metrics": metrics,
         "predictions": predictions,
     }
+
+
+def evaluate_pretrained_generation(
+    config: Mapping[str, Any],
+    split: Optional[str] = None,
+    max_examples: Optional[int] = None,
+) -> Dict[str, Any]:
+    from src.data import build_dataloaders
+    from src.model import load_model_and_tokenizer
+
+    model, tokenizer, device = load_model_and_tokenizer(config)
+    dataloaders = build_dataloaders(tokenizer=tokenizer, config=config)
+
+    configured_split = config["data"].get("eval_split", "validation")
+    split_name = split or configured_split
+    if split_name != configured_split:
+        raise ValueError(
+            f"split={split_name!r} does not match the configured eval split {configured_split!r}. "
+            "Update config['data']['eval_split'] to change the eval setting."
+        )
+
+    eval_dataset = limit_dataset(dataloaders["eval_generation"].dataset, max_examples)
+    return evaluate_generation(
+        model=model,
+        tokenizer=tokenizer,
+        dataset=eval_dataset,
+        config=config,
+        device=device,
+    )

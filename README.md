@@ -138,6 +138,19 @@ Standalone evaluation script that:
 - runs shared generation-based evaluation
 - saves metrics to JSON
 
+### `scripts/eval_pretrained.py`
+
+Standalone pretrained baseline evaluation script that:
+
+- loads the same effective config stack as `experiments/lora_benchmark.py`
+- delegates model/dataloader/generation evaluation to `src.evaluator`
+- evaluates the base model without requiring a checkpoint
+- disables PEFT so the model remains pretrained-only
+- uses the shared 4-shot chain-of-thought prompt from `src.data`
+- supports quick subset runs with `--max-examples`
+- optionally fails when accuracy is below `--min-accuracy`
+- saves metrics and per-example predictions to JSON
+
 ### `scripts/summarizing.py`
 
 Shared result summarization script that:
@@ -236,6 +249,21 @@ Run the LoRA benchmark:
 
 ```bash
 python3 experiments/lora_benchmark.py
+```
+
+## Pretrained Accuracy Baseline
+
+Evaluate the configured base model before fine-tuning using the LoRA benchmark
+eval settings and 4-shot chain-of-thought prompting:
+
+```bash
+python3 scripts/eval_pretrained.py --max-examples 100
+```
+
+To use it as a pass/fail eval test, add a threshold:
+
+```bash
+python3 scripts/eval_pretrained.py --max-examples 100 --min-accuracy 0.10
 ```
 
 Dry-run (validate and print the resolved output directory without training):

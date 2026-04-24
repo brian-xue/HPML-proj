@@ -17,7 +17,7 @@ EXPERIMENT = {
     "description": "FSDP scaling run (weak scaling; eval disabled).",
     "base_config": "configs/base.yaml",
     "device_config": "configs/distributed/fsdp.yaml",
-    "run": {"mode": "new", "resume_version": None},
+    "run": {"mode": "auto", "resume_version": None},
     "artifacts": {"results_filename": "final_results.json", "save_eval_metrics_json": False},
     "overrides": {
         "evaluation": {"enabled": False},
@@ -42,7 +42,7 @@ EXPERIMENT = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run FSDP scaling benchmark.")
-    parser.add_argument("--mode", choices=["new", "resume"], default="new")
+    parser.add_argument("--mode", choices=["auto", "new", "resume"], default="auto")
     parser.add_argument("--resume-version", type=str, default=None)
     parser.add_argument("--max-steps", type=int, default=500)
     parser.add_argument("--output-root", type=str, default=None)
@@ -70,4 +70,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

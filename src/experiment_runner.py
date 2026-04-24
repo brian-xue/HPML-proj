@@ -8,6 +8,7 @@ from src.utils import (
     deep_update,
     default_config,
     format_metrics,
+    load_json,
     list_versioned_run_dirs,
     load_config,
     make_versioned_output_dir,
@@ -33,6 +34,46 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class ExperimentNotImplementedError(RuntimeError):
     pass
+
+
+def _read_results(run_dir, results_filename):
+    results_path = Path(run_dir) / str(results_filename)
+    if not results_path.exists():
+        return None
+    try:
+        return load_json(results_path)
+    except Exception:
+        return None
+
+
+def _has_resume_artifacts(run_dir):
+    run_dir = Path(run_dir)
+    config_path = run_dir / "config.yaml"
+    latest_checkpoint_path = run_dir / "checkpoints" / "latest_checkpoint.json"
+    return config_path.exists() and latest_checkpoint_path.exists()
+
+
+def is_completed_run(run_dir, results_filename="final_results.json"):
+    results = _read_results(run_dir, results_filename)
+    if not isinstance(results, dict):
+        return False
+    if str(results.get("status", "")).lower() == "completed":
+        return True
+    return True
+
+
+def resolve_auto_run_state(output_root, experiment_name, results_filename="final_results.json"):
+    experiment_root = Path(output_root) / sanitize_for_path(experiment_name)
+    latest_run_dir = list_versioned_run_dirs(experiment_root)
+    if not latest_run_dir:
+        return "new", None
+
+    latest_run_dir = latest_run_dir[-1]
+    if is_completed_run(latest_run_dir, results_filename=results_filename):
+        return "skip", latest_run_dir
+    if not _has_resume_artifacts(latest_run_dir):
+        return "new", None
+    return "resume", latest_run_dir
 
 
 def load_effective_config(base_config_path, device_config_path=None, overrides=None):
@@ -61,6 +102,15 @@ def resolve_run_dir(output_root, experiment_name, mode, resume_version=None, dry
         return make_versioned_output_dir(output_root, experiment_name)
     if mode == "resume":
         return resolve_versioned_run_dir(output_root, experiment_name, resume_version)
+    if mode == "auto":
+        resolved_mode, resolved_run_dir = resolve_auto_run_state(output_root, experiment_name)
+        if resolved_mode == "new":
+            if dry_run:
+                return _next_versioned_run_dir(output_root, experiment_name)
+            return make_versioned_output_dir(output_root, experiment_name)
+        if resolved_run_dir is None:
+            raise FileNotFoundError(f"Unable to resolve run dir for experiment: {experiment_name}")
+        return resolved_run_dir
     raise ValueError(f"Unsupported run mode: {mode}")
 
 
@@ -158,7 +208,7 @@ def run_experiment(exp, dry_run=False):
     device_config = exp.get("device_config")
 
     run_cfg = exp.get("run") or {}
-    mode = str(run_cfg.get("mode", "new")).lower()
+    mode = str(run_cfg.get("mode", "auto")).lower()
     resume_version = run_cfg.get("resume_version")
 
     overrides = exp.get("overrides") or {}
@@ -188,24 +238,58 @@ def run_experiment(exp, dry_run=False):
     execution_mode = str(execution_cfg.get("mode", "single_gpu")).lower()
     distributed_enabled = bool(distributed_cfg.get("enabled", False)) or execution_mode in {"ddp", "fsdp"}
 
-    if distributed_enabled:
+    if distributed_enabled and is_distributed():
         init_distributed(backend=str(distributed_cfg.get("backend", "nccl") or "nccl"))
 
-    if distributed_enabled and is_distributed():
+    effective_mode = mode
+    if mode == "auto":
+        if distributed_enabled and is_distributed():
+            if is_main_process():
+                auto_mode, auto_run_dir = resolve_auto_run_state(output_root, name, results_filename=results_filename)
+            else:
+                auto_mode, auto_run_dir = None, None
+            effective_mode, auto_run_dir = broadcast_object((auto_mode, auto_run_dir), src=0)
+            run_dir = auto_run_dir if auto_run_dir is not None else resolve_run_dir(
+                output_root,
+                name,
+                effective_mode,
+                resume_version=resume_version,
+                dry_run=dry_run,
+            )
+            barrier()
+        else:
+            effective_mode, auto_run_dir = resolve_auto_run_state(output_root, name, results_filename=results_filename)
+            run_dir = auto_run_dir if auto_run_dir is not None else resolve_run_dir(
+                output_root,
+                name,
+                effective_mode,
+                resume_version=resume_version,
+                dry_run=dry_run,
+            )
+    elif distributed_enabled and is_distributed():
         if is_main_process():
-            resolved_run_dir = resolve_run_dir(output_root, name, mode, resume_version=resume_version, dry_run=dry_run)
+            resolved_run_dir = resolve_run_dir(
+                output_root,
+                name,
+                effective_mode,
+                resume_version=resume_version,
+                dry_run=dry_run,
+            )
         else:
             resolved_run_dir = None
         resolved_run_dir = broadcast_object(resolved_run_dir, src=0)
         run_dir = resolved_run_dir
         barrier()
     else:
-        run_dir = resolve_run_dir(output_root, name, mode, resume_version=resume_version, dry_run=dry_run)
+        run_dir = resolve_run_dir(output_root, name, effective_mode, resume_version=resume_version, dry_run=dry_run)
+
+    if mode == "auto" and effective_mode == "skip":
+        return Path(run_dir)
     if dry_run:
         return run_dir
 
     # For resume correctness: load the exact config used to create this run dir.
-    config = _load_resume_config(run_dir) if mode == "resume" else bootstrap_config
+    config = _load_resume_config(run_dir) if effective_mode == "resume" else bootstrap_config
     config["run_name"] = name
     _validate_supported_features(config, name)
 
@@ -220,7 +304,7 @@ def run_experiment(exp, dry_run=False):
     logger = setup_logger(f"experiment.{name}.{Path(run_dir).name}{rank_suffix}", output_dir=run_dir, filename=filename)
     if exp.get("description"):
         logger.info("Description: %s", exp.get("description"))
-    logger.info("Starting experiment '%s' (%s) at %s", name, mode, run_dir)
+    logger.info("Starting experiment '%s' (%s) at %s", name, effective_mode, run_dir)
 
     set_random_seed(int(config.get("seed", 42)))
 
@@ -243,7 +327,7 @@ def run_experiment(exp, dry_run=False):
                 "name": name,
                 "base_config": base_config,
                 "device_config": device_config,
-                "run": {"mode": mode, "resume_version": resume_version},
+                "run": {"mode": effective_mode, "resume_version": resume_version},
                 "overrides": overrides,
                 "artifacts": {"results_filename": results_filename, "save_eval_metrics_json": save_eval_metrics_json},
             },
@@ -291,7 +375,7 @@ def run_experiment(exp, dry_run=False):
         trainer_kwargs["train_sampler"] = dataloaders.get("train_sampler")
     trainer = trainer_cls(**trainer_kwargs)
 
-    if mode == "resume":
+    if effective_mode == "resume":
         trainer.resume_from_latest_checkpoint()
 
     logger.info("Device: %s", device)

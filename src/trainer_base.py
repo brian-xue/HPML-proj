@@ -343,4 +343,5 @@ class BaseTrainer:
 
         final_results["runtime"] = self.runtime.summary()
         final_results["state"] = self.state.as_dict()
+        final_results["status"] = "completed"
         return final_results

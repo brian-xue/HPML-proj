@@ -40,12 +40,31 @@ def save_checkpoint(
     global_step: Optional[int] = None,
     metadata: Optional[Mapping[str, Any]] = None,
     dir_name: str = "checkpoints",
+    save_trainable_only: bool = False,
 ) -> Path:
     checkpoint_dir = build_checkpoint_dir(output_dir, step=global_step, epoch=epoch, dir_name=dir_name)
     ensure_dir(checkpoint_dir)
 
+    # If distributed is initialized, write per-rank files to avoid clobbering and
+    # enable resumable sharded states (especially for FSDP).
+    rank = 0
+    world_size = 1
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = int(torch.distributed.get_rank())
+        world_size = int(torch.distributed.get_world_size())
+
+    state_model = None
+    if save_trainable_only:
+        trainable = {}
+        for name, param in model.named_parameters():
+            if getattr(param, "requires_grad", False):
+                trainable[name] = param.detach().cpu()
+        state_model = trainable
+    else:
+        state_model = model.state_dict()
+
     state = {
-        "model": model.state_dict(),
+        "model": state_model,
         "optimizer": optimizer.state_dict() if optimizer is not None else None,
         "scheduler": scheduler.state_dict() if scheduler is not None else None,
         "metadata": {
@@ -53,11 +72,26 @@ def save_checkpoint(
             "global_step": global_step,
             **dict(metadata or {}),
         },
+        "distributed": {
+            "rank": rank,
+            "world_size": world_size,
+            "per_rank_files": world_size > 1,
+            "save_trainable_only": bool(save_trainable_only),
+        },
     }
-    torch.save(state, checkpoint_dir / "training_state.pt")
-    save_json(state["metadata"], checkpoint_dir / "metadata.json")
-    latest_metadata_path = get_latest_checkpoint_metadata_path(output_dir, dir_name=dir_name)
-    save_json({"checkpoint_dir": str(checkpoint_dir.resolve())}, latest_metadata_path)
+
+    if world_size > 1:
+        torch.save(state, checkpoint_dir / f"training_state_rank{rank}.pt")
+        save_json(state["metadata"], checkpoint_dir / f"metadata_rank{rank}.json")
+        if rank == 0:
+            latest_metadata_path = get_latest_checkpoint_metadata_path(output_dir, dir_name=dir_name)
+            save_json({"checkpoint_dir": str(checkpoint_dir.resolve())}, latest_metadata_path)
+    else:
+        torch.save(state, checkpoint_dir / "training_state.pt")
+        save_json(state["metadata"], checkpoint_dir / "metadata.json")
+        latest_metadata_path = get_latest_checkpoint_metadata_path(output_dir, dir_name=dir_name)
+        save_json({"checkpoint_dir": str(checkpoint_dir.resolve())}, latest_metadata_path)
+
     if hasattr(model, "save_pretrained"):
         adapter_dir = checkpoint_dir / "adapter"
         try:
@@ -73,10 +107,19 @@ def load_checkpoint(
     optimizer: Optional[torch.optim.Optimizer] = None,
     scheduler: Optional[Any] = None,
     map_location: str | torch.device = "cpu",
+    strict: bool = True,
 ) -> Dict[str, Any]:
-    checkpoint_path = Path(checkpoint_dir) / "training_state.pt"
+    checkpoint_root = Path(checkpoint_dir)
+    checkpoint_path = checkpoint_root / "training_state.pt"
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = int(torch.distributed.get_rank())
+        candidate = checkpoint_root / f"training_state_rank{rank}.pt"
+        if candidate.exists():
+            checkpoint_path = candidate
     state = torch.load(checkpoint_path, map_location=map_location)
-    model.load_state_dict(state["model"])
+    model_state = state.get("model")
+    if model_state is not None:
+        model.load_state_dict(model_state, strict=strict)
 
     if optimizer is not None and state.get("optimizer") is not None:
         optimizer.load_state_dict(state["optimizer"])

@@ -96,12 +96,14 @@ class BaseTrainer:
             self.output_dir,
             dir_name=self.checkpoint_config.get("dir_name", "checkpoints"),
         )
+        save_trainable_only = bool(self.checkpoint_config.get("save_trainable_only", False))
         metadata = load_checkpoint(
             checkpoint_dir=checkpoint_dir,
             model=self.model,
             optimizer=self.optimizer,
             scheduler=self.scheduler,
             map_location=self.device,
+            strict=not save_trainable_only,
         )
         self.load_state(metadata)
         self.logger.info("Resumed from checkpoint %s", checkpoint_dir)
@@ -119,17 +121,33 @@ class BaseTrainer:
         self.model.train()
         batch = move_batch_to_device(batch, self.device)
 
+        profile_cfg = self.config.get("profile", {}) or {}
+        nvtx_enabled = bool(profile_cfg.get("nvtx", False)) and self.device.type == "cuda" and torch.cuda.is_available()
+
         gradient_accumulation_steps = int(self.training_config.get("gradient_accumulation_steps", 1))
+        if nvtx_enabled:
+            torch.cuda.nvtx.range_push("forward_loss")
         loss = self.compute_loss(batch)
+        if nvtx_enabled:
+            torch.cuda.nvtx.range_pop()
+
         scaled_loss = loss / gradient_accumulation_steps
+        if nvtx_enabled:
+            torch.cuda.nvtx.range_push("backward")
         scaled_loss.backward()
+        if nvtx_enabled:
+            torch.cuda.nvtx.range_pop()
         self._grad_accum_counter += 1
         self.state.micro_step += 1
         self.state.epoch_step += 1
 
         should_step = self._grad_accum_counter >= gradient_accumulation_steps
         if should_step:
+            if nvtx_enabled:
+                torch.cuda.nvtx.range_push("optimizer_step")
             self._perform_optimizer_step()
+            if nvtx_enabled:
+                torch.cuda.nvtx.range_pop()
 
         return {
             "loss": float(loss.detach().item()),
@@ -273,6 +291,7 @@ class BaseTrainer:
             global_step=self.state.global_step,
             metadata=self.state.as_dict(),
             dir_name=dir_name,
+            save_trainable_only=bool(self.checkpoint_config.get("save_trainable_only", False)),
         )
 
         if metric_value is None:

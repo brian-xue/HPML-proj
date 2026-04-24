@@ -1,0 +1,30 @@
+# Execution template for DDP scaling runs (single node via torchrun).
+
+execution:
+  mode: ddp
+  local_rank: 0
+
+distributed:
+  enabled: true
+  backend: nccl
+
+model:
+  dtype: bf16
+  device: null
+
+dataloader:
+  # Per-GPU batch size stays fixed for weak scaling.
+  train_batch_size: 4
+  eval_batch_size: 4
+  num_workers: 0
+  pin_memory: true
+
+training:
+  num_epochs: 1
+  max_steps: null
+  gradient_accumulation_steps: 1
+  log_every_steps: 10
+  eval_every_steps: 0
+  save_every_steps: 200
+  save_at_end: true
+

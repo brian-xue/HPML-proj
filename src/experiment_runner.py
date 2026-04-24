@@ -18,6 +18,14 @@ from src.utils import (
     set_random_seed,
     setup_logger,
 )
+from src.distributed import (
+    barrier,
+    broadcast_object,
+    get_local_rank,
+    init_distributed,
+    is_distributed,
+    is_main_process,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -65,11 +73,12 @@ def _validate_supported_features(config, experiment_name):
                 f"Experiment '{experiment_name}' requests PEFT method '{method}', but only 'lora' is implemented."
             )
 
-    distributed_cfg = config.get("distributed", {}) or {}
+    # DDP/FSDP are supported; keep this for future methods (pipeline parallel, etc).
     execution_cfg = config.get("execution", {}) or {}
-    if distributed_cfg.get("enabled", False) or str(execution_cfg.get("mode", "single_gpu")).lower() in {"ddp", "fsdp"}:
+    execution_mode = str(execution_cfg.get("mode", "single_gpu")).lower()
+    if execution_mode not in {"single_gpu", "ddp", "fsdp"}:
         raise ExperimentNotImplementedError(
-            f"Experiment '{experiment_name}' requests distributed mode, but DDP/FSDP runners are not implemented yet."
+            f"Experiment '{experiment_name}' requests unsupported execution.mode '{execution_mode}'."
         )
 
     training_cfg = config.get("training", {}) or {}
@@ -174,7 +183,24 @@ def run_experiment(exp, dry_run=False):
     _validate_supported_features(bootstrap_config, name)
 
     output_root = bootstrap_config.get("output_root", "output")
-    run_dir = resolve_run_dir(output_root, name, mode, resume_version=resume_version, dry_run=dry_run)
+    execution_cfg = bootstrap_config.get("execution", {}) or {}
+    distributed_cfg = bootstrap_config.get("distributed", {}) or {}
+    execution_mode = str(execution_cfg.get("mode", "single_gpu")).lower()
+    distributed_enabled = bool(distributed_cfg.get("enabled", False)) or execution_mode in {"ddp", "fsdp"}
+
+    if distributed_enabled:
+        init_distributed(backend=str(distributed_cfg.get("backend", "nccl") or "nccl"))
+
+    if distributed_enabled and is_distributed():
+        if is_main_process():
+            resolved_run_dir = resolve_run_dir(output_root, name, mode, resume_version=resume_version, dry_run=dry_run)
+        else:
+            resolved_run_dir = None
+        resolved_run_dir = broadcast_object(resolved_run_dir, src=0)
+        run_dir = resolved_run_dir
+        barrier()
+    else:
+        run_dir = resolve_run_dir(output_root, name, mode, resume_version=resume_version, dry_run=dry_run)
     if dry_run:
         return run_dir
 
@@ -183,49 +209,87 @@ def run_experiment(exp, dry_run=False):
     config["run_name"] = name
     _validate_supported_features(config, name)
 
-    logger = setup_logger(f"experiment.{name}.{Path(run_dir).name}", output_dir=run_dir)
+    rank_suffix = ""
+    filename = "run.log"
+    if distributed_enabled and is_distributed():
+        import torch.distributed as dist
+
+        rank_suffix = f".rank{dist.get_rank()}"
+        if not is_main_process():
+            filename = f"run{rank_suffix}.log"
+    logger = setup_logger(f"experiment.{name}.{Path(run_dir).name}{rank_suffix}", output_dir=run_dir, filename=filename)
     if exp.get("description"):
         logger.info("Description: %s", exp.get("description"))
     logger.info("Starting experiment '%s' (%s) at %s", name, mode, run_dir)
 
     set_random_seed(int(config.get("seed", 42)))
 
-    from src.data import build_dataloaders
     from src.model import load_model_and_tokenizer
     from src.trainer_base import BaseTrainer
+    from src.trainer_distributed import DistributedTrainer
+
+    if distributed_enabled and is_distributed():
+        local_rank = get_local_rank()
+        config.setdefault("model", {})
+        config["model"]["device"] = f"cuda:{local_rank}"
 
     model, tokenizer, device = load_model_and_tokenizer(config)
     model, peft_metadata = apply_lora_and_persist(model, config, Path(run_dir), logger)
 
-    save_config(config, Path(run_dir) / "config.yaml")
-    save_json(
-        {
-            "name": name,
-            "base_config": base_config,
-            "device_config": device_config,
-            "run": {"mode": mode, "resume_version": resume_version},
-            "overrides": overrides,
-            "artifacts": {"results_filename": results_filename, "save_eval_metrics_json": save_eval_metrics_json},
-        },
-        Path(run_dir) / "experiment.json",
-    )
+    if is_main_process() or not (distributed_enabled and is_distributed()):
+        save_config(config, Path(run_dir) / "config.yaml")
+        save_json(
+            {
+                "name": name,
+                "base_config": base_config,
+                "device_config": device_config,
+                "run": {"mode": mode, "resume_version": resume_version},
+                "overrides": overrides,
+                "artifacts": {"results_filename": results_filename, "save_eval_metrics_json": save_eval_metrics_json},
+            },
+            Path(run_dir) / "experiment.json",
+        )
+    barrier()
 
-    dataloaders = build_dataloaders(tokenizer=tokenizer, config=config)
+    from src.data import build_dataloaders
+
+    include_eval = bool((config.get("evaluation", {}) or {}).get("enabled", True))
+    dataloaders = build_dataloaders(tokenizer=tokenizer, config=config, include_generation_eval=include_eval)
     optimizer = _build_optimizer(model, config)
     scheduler = _build_scheduler(optimizer, dataloaders["train"], config)
 
-    trainer = BaseTrainer(
+    trainer_cls = BaseTrainer
+    if distributed_enabled and is_distributed():
+        import torch.distributed as dist
+        from torch.nn.parallel import DistributedDataParallel
+
+        if execution_mode == "ddp":
+            model = DistributedDataParallel(model, device_ids=[get_local_rank()])
+        elif execution_mode == "fsdp":
+            from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+            model = FSDP(model, device_id=get_local_rank(), use_orig_params=True)
+        trainer_cls = DistributedTrainer
+
+    eval_dataset = None
+    if include_eval and "eval_generation" in dataloaders:
+        eval_dataset = dataloaders["eval_generation"].dataset
+
+    trainer_kwargs = dict(
         model=model,
         tokenizer=tokenizer,
         optimizer=optimizer,
         scheduler=scheduler,
         train_dataloader=dataloaders["train"],
-        eval_dataset=dataloaders["eval_generation"].dataset,
+        eval_dataset=eval_dataset,
         device=device,
         config=config,
         output_dir=run_dir,
         logger=logger,
     )
+    if trainer_cls is DistributedTrainer:
+        trainer_kwargs["train_sampler"] = dataloaders.get("train_sampler")
+    trainer = trainer_cls(**trainer_kwargs)
 
     if mode == "resume":
         trainer.resume_from_latest_checkpoint()
@@ -235,10 +299,11 @@ def run_experiment(exp, dry_run=False):
     results = trainer.train()
     results["peft"] = peft_metadata
 
-    results_path = Path(run_dir) / str(results_filename)
-    save_json(results, results_path)
-    if save_eval_metrics_json:
-        save_json(results.get("eval", {}), Path(run_dir) / "eval_metrics.json")
-
-    logger.info("Finished experiment '%s'. Results saved to %s", name, results_path)
+    if is_main_process() or not (distributed_enabled and is_distributed()):
+        results_path = Path(run_dir) / str(results_filename)
+        save_json(results, results_path)
+        if save_eval_metrics_json:
+            save_json(results.get("eval", {}), Path(run_dir) / "eval_metrics.json")
+        logger.info("Finished experiment '%s'. Results saved to %s", name, results_path)
+    barrier()
     return Path(run_dir)

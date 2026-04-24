@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+import os
+from typing import Any
+
+
+def is_distributed() -> bool:
+    return bool(os.environ.get("RANK")) and bool(os.environ.get("WORLD_SIZE"))
+
+
+def get_rank() -> int:
+    return int(os.environ.get("RANK", "0"))
+
+
+def get_world_size() -> int:
+    return int(os.environ.get("WORLD_SIZE", "1"))
+
+
+def get_local_rank() -> int:
+    return int(os.environ.get("LOCAL_RANK", "0"))
+
+
+def is_main_process() -> bool:
+    return get_rank() == 0
+
+
+def init_distributed(backend: str = "nccl") -> None:
+    import torch.distributed as dist
+
+    if dist.is_available() and not dist.is_initialized() and is_distributed():
+        dist.init_process_group(backend=backend)
+
+
+def barrier() -> None:
+    import torch.distributed as dist
+
+    if dist.is_available() and dist.is_initialized():
+        dist.barrier()
+
+
+def broadcast_object(obj: Any, src: int = 0) -> Any:
+    import torch.distributed as dist
+
+    if not (dist.is_available() and dist.is_initialized()):
+        return obj
+    object_list = [obj]
+    dist.broadcast_object_list(object_list, src=src)
+    return object_list[0]
+
+
+def all_reduce_sum_float(value: float, device: str | None = None) -> float:
+    import torch
+    import torch.distributed as dist
+
+    if not (dist.is_available() and dist.is_initialized()):
+        return float(value)
+    tensor = torch.tensor(float(value), device=device or "cuda")
+    dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+    return float(tensor.item())
+
+
+def all_reduce_max_float(value: float, device: str | None = None) -> float:
+    import torch
+    import torch.distributed as dist
+
+    if not (dist.is_available() and dist.is_initialized()):
+        return float(value)
+    tensor = torch.tensor(float(value), device=device or "cuda")
+    dist.all_reduce(tensor, op=dist.ReduceOp.MAX)
+    return float(tensor.item())

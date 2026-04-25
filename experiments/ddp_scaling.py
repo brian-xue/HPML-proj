@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.experiment_runner import run_experiment
-from src.distributed import is_main_process
+from src.distributed import get_world_size, is_main_process
 
 
 EXPERIMENT = {
@@ -56,6 +56,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     exp = deepcopy(EXPERIMENT)
+    world_size = max(1, int(get_world_size()))
     exp["run"]["mode"] = args.mode
     exp["run"]["resume_version"] = args.resume_version
     exp.setdefault("overrides", {}).setdefault("training", {})["max_steps"] = int(args.max_steps)
@@ -63,6 +64,7 @@ def main() -> None:
     exp["overrides"]["profile"]["cuda_profiler"] = bool(int(os.environ.get("HPML_PROFILE_CUDA", "0")))
     exp["overrides"]["profile"]["warmup_steps"] = int(os.environ.get("HPML_PROFILE_WARMUP_STEPS", "0"))
     exp["overrides"]["profile"]["active_steps"] = int(os.environ.get("HPML_PROFILE_ACTIVE_STEPS", "0"))
+    exp["name"] = f"{exp['name']}_{world_size}gpu"
 
     if args.output_root is not None:
         exp.setdefault("overrides", {})["output_root"] = str(args.output_root)

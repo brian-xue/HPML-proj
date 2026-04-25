@@ -24,6 +24,7 @@ from src.distributed import (
     broadcast_object,
     destroy_distributed,
     get_local_rank,
+    get_world_size,
     init_distributed,
     is_distributed,
     is_main_process,
@@ -238,6 +239,7 @@ def run_experiment(exp, dry_run=False):
     distributed_cfg = bootstrap_config.get("distributed", {}) or {}
     execution_mode = str(execution_cfg.get("mode", "single_gpu")).lower()
     distributed_enabled = bool(distributed_cfg.get("enabled", False)) or execution_mode in {"ddp", "fsdp"}
+    launched_world_size = int(get_world_size()) if distributed_enabled else 1
 
     if distributed_enabled and is_distributed():
         init_distributed(backend=str(distributed_cfg.get("backend", "nccl") or "nccl"))
@@ -299,6 +301,10 @@ def run_experiment(exp, dry_run=False):
     # For resume correctness: load the exact config used to create this run dir.
     config = _load_resume_config(run_dir) if effective_mode == "resume" else bootstrap_config
     config["run_name"] = name
+    config.setdefault("distributed", {})
+    config["distributed"]["world_size"] = launched_world_size
+    if distributed_enabled and is_distributed():
+        config["distributed"]["local_rank"] = get_local_rank()
     _validate_supported_features(config, name)
 
     rank_suffix = ""
@@ -336,6 +342,7 @@ def run_experiment(exp, dry_run=False):
                 "base_config": base_config,
                 "device_config": device_config,
                 "run": {"mode": effective_mode, "resume_version": resume_version},
+                "launch": {"world_size": launched_world_size},
                 "overrides": overrides,
                 "artifacts": {"results_filename": results_filename, "save_eval_metrics_json": save_eval_metrics_json},
             },
@@ -390,6 +397,7 @@ def run_experiment(exp, dry_run=False):
     logger.info("Total parameters before training: %s", count_parameters(model))
     results = trainer.train()
     results["peft"] = peft_metadata
+    results["launch"] = {"world_size": launched_world_size}
 
     if is_main_process() or not (distributed_enabled and is_distributed()):
         results_path = Path(run_dir) / str(results_filename)

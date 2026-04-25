@@ -22,6 +22,7 @@ from src.utils import (
 from src.distributed import (
     barrier,
     broadcast_object,
+    destroy_distributed,
     get_local_rank,
     init_distributed,
     is_distributed,
@@ -287,8 +288,12 @@ def run_experiment(exp, dry_run=False):
         run_dir = resolve_run_dir(output_root, name, effective_mode, resume_version=resume_version, dry_run=dry_run)
 
     if mode == "auto" and effective_mode == "skip":
+        if distributed_enabled and is_distributed():
+            destroy_distributed()
         return Path(run_dir)
     if dry_run:
+        if distributed_enabled and is_distributed():
+            destroy_distributed()
         return run_dir
 
     # For resume correctness: load the exact config used to create this run dir.
@@ -393,4 +398,6 @@ def run_experiment(exp, dry_run=False):
             save_json(results.get("eval", {}), Path(run_dir) / "eval_metrics.json")
         logger.info("Finished experiment '%s'. Results saved to %s", name, results_path)
     barrier()
+    if distributed_enabled and is_distributed():
+        destroy_distributed()
     return Path(run_dir)

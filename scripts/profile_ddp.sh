@@ -46,7 +46,7 @@ if command -v ncu >/dev/null 2>&1; then
     HPML_PROFILE_CUDA=1 \
     HPML_PROFILE_WARMUP_STEPS="${PROFILE_WARMUP_STEPS}" \
     HPML_PROFILE_ACTIVE_STEPS="${PROFILE_ACTIVE_STEPS}" \
-    ncu --target-processes all --profile-from-start off --replay-mode range -o "${NCU_PREFIX}" \
+    ncu --target-processes all --replay-mode range -o "${NCU_PREFIX}" \
       torchrun --standalone --nproc_per_node="${NPROC}" "${EXP}" --max-steps "${PROFILE_MAX_STEPS}" --run-label ncu
   fi
 else

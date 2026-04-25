@@ -58,6 +58,13 @@ def barrier() -> None:
             dist.barrier()
 
 
+def destroy_distributed() -> None:
+    import torch.distributed as dist
+
+    if dist.is_available() and dist.is_initialized():
+        dist.destroy_process_group()
+
+
 def broadcast_object(obj: Any, src: int = 0) -> Any:
     import torch.distributed as dist
 

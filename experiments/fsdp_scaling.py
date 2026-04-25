@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.experiment_runner import run_experiment
+from src.distributed import is_main_process
 
 
 EXPERIMENT = {
@@ -70,7 +71,8 @@ def main() -> None:
         exp["name"] = f"{exp['name']}_{args.run_label}"
 
     run_dir = run_experiment(exp, dry_run=bool(args.dry_run))
-    print(run_dir)
+    if is_main_process():
+        print(run_dir)
 
 
 if __name__ == "__main__":

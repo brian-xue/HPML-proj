@@ -246,16 +246,19 @@ def run_experiment(exp, dry_run=False):
         if distributed_enabled and is_distributed():
             if is_main_process():
                 auto_mode, auto_run_dir = resolve_auto_run_state(output_root, name, results_filename=results_filename)
+                resolved_run_dir = auto_run_dir
+                if resolved_run_dir is None:
+                    resolved_run_dir = resolve_run_dir(
+                        output_root,
+                        name,
+                        auto_mode,
+                        resume_version=resume_version,
+                        dry_run=dry_run,
+                    )
+                payload = (auto_mode, resolved_run_dir)
             else:
-                auto_mode, auto_run_dir = None, None
-            effective_mode, auto_run_dir = broadcast_object((auto_mode, auto_run_dir), src=0)
-            run_dir = auto_run_dir if auto_run_dir is not None else resolve_run_dir(
-                output_root,
-                name,
-                effective_mode,
-                resume_version=resume_version,
-                dry_run=dry_run,
-            )
+                payload = None
+            effective_mode, run_dir = broadcast_object(payload, src=0)
             barrier()
         else:
             effective_mode, auto_run_dir = resolve_auto_run_state(output_root, name, results_filename=results_filename)

@@ -27,25 +27,35 @@ def is_main_process() -> bool:
 
 
 def init_distributed(backend: str = "nccl") -> None:
+    import torch
     import torch.distributed as dist
 
     if not is_distributed():
         return
     if not dist.is_available() or dist.is_initialized():
         return
-    if str(backend).lower() == "nccl" and not dist.is_nccl_available():
+    backend = str(backend).lower()
+    if backend == "nccl" and not dist.is_nccl_available():
         raise RuntimeError(
             "PyTorch distributed was built without NCCL support. "
             "Install a CUDA/NCCL-enabled PyTorch build, or set distributed.backend=gloo for CPU-only testing."
         )
-    dist.init_process_group(backend=str(backend).lower())
+    if backend == "nccl":
+        if not torch.cuda.is_available():
+            raise RuntimeError("NCCL backend requires CUDA, but CUDA is not available.")
+        torch.cuda.set_device(get_local_rank())
+    dist.init_process_group(backend=backend)
 
 
 def barrier() -> None:
+    import torch
     import torch.distributed as dist
 
     if dist.is_available() and dist.is_initialized():
-        dist.barrier()
+        if dist.get_backend() == "nccl" and torch.cuda.is_available():
+            dist.barrier(device_ids=[get_local_rank()])
+        else:
+            dist.barrier()
 
 
 def broadcast_object(obj: Any, src: int = 0) -> Any:

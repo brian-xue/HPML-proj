@@ -9,6 +9,7 @@ import torch
 from src.checkpoint import get_latest_checkpoint_dir, load_checkpoint, maybe_save_best_checkpoint, save_checkpoint
 from src.evaluator import evaluate_generation
 from src.metrics import RuntimeTracker
+from src.profiler import CudaProfileWindow
 from src.utils import format_metrics, move_batch_to_device
 
 
@@ -71,6 +72,7 @@ class BaseTrainer:
         self.logger = logger
         self.state = TrainerState()
         self.runtime = RuntimeTracker(device=device)
+        self.profiler = CudaProfileWindow(config=config, logger=logger)
         self._grad_accum_counter = 0
         self._log_interval_tokens = 0
         self._log_interval_step_time_s = 0.0
@@ -205,7 +207,7 @@ class BaseTrainer:
                     reserved_mem = torch.cuda.memory_reserved(self.device) / (1024 ** 2)
                     max_gpu_mem = torch.cuda.max_memory_allocated(self.device) / (1024 ** 2)
                     self.logger.info(
-                        "epoch=%s step=%s %s gpu_mem=%.2fMB reserved_mem=%.2fMB max_gpu_mem=%.2fMB",
+                        "epoch=%s step=%s %s",
                         epoch,
                         self.state.global_step,
                         format_metrics(
@@ -235,6 +237,10 @@ class BaseTrainer:
 
                 self._log_interval_tokens = 0
                 self._log_interval_step_time_s = 0.0
+
+            if step_metrics["optimizer_stepped"]:
+                self.profiler.maybe_start(self.state.global_step)
+                self.profiler.maybe_stop(self.state.global_step)
 
             if step_metrics["optimizer_stepped"] and self.should_evaluate():
                 eval_results = self.evaluate()
@@ -339,6 +345,7 @@ class BaseTrainer:
                 if self.should_stop():
                     break
         finally:
+            self.profiler.close()
             self.runtime.stop_run()
 
         final_results["runtime"] = self.runtime.summary()

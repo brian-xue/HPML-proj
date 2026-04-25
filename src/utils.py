@@ -310,6 +310,8 @@ def default_config() -> Dict[str, Any]:
             "name": DEFAULT_MODEL_NAME,
             "dtype": "bf16",
             "device": None,
+            "cache_dir": "data/model_cache",
+            "local_files_only": False,
             "trust_remote_code": False,
             "use_cache": True,
             "padding_side": "right",

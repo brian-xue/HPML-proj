@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -57,6 +58,10 @@ def main() -> None:
     exp["run"]["mode"] = args.mode
     exp["run"]["resume_version"] = args.resume_version
     exp.setdefault("overrides", {}).setdefault("training", {})["max_steps"] = int(args.max_steps)
+    exp.setdefault("overrides", {}).setdefault("profile", {})
+    exp["overrides"]["profile"]["cuda_profiler"] = bool(int(os.environ.get("HPML_PROFILE_CUDA", "0")))
+    exp["overrides"]["profile"]["warmup_steps"] = int(os.environ.get("HPML_PROFILE_WARMUP_STEPS", "0"))
+    exp["overrides"]["profile"]["active_steps"] = int(os.environ.get("HPML_PROFILE_ACTIVE_STEPS", "0"))
 
     if args.output_root is not None:
         exp.setdefault("overrides", {})["output_root"] = str(args.output_root)

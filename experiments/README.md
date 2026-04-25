@@ -44,6 +44,10 @@ bash scripts/profile_ddp.sh 4
 bash scripts/profile_fsdp.sh 4
 ```
 
+These wrappers profile only a post-warmup training window rather than full
+startup. You can tune the window with `PROFILE_WARMUP_STEPS`,
+`PROFILE_ACTIVE_STEPS`, and `PROFILE_MAX_STEPS`.
+
 ## Output layout
 
 Runs write to versioned directories under `output/<experiment-name>/v###/`, for example:

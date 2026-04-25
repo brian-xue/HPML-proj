@@ -1,0 +1,41 @@
+name: lora_baseline
+description: "LoRA baseline on GSM8K for efficiency/accuracy comparisons."
+base_config: configs/base.yaml
+device_config: configs/distributed/single_gpu.yaml
+run:
+  mode: new
+  resume_version: null
+tags: ["peft", "lora", "single_gpu"]
+artifacts:
+  save_experiment_spec: true
+  results_filename: final_results.json
+  save_eval_metrics_json: false
+overrides:
+  training:
+    num_epochs: 1
+    max_steps: 1000
+    log_every_steps: 10
+    eval_every_steps: 200
+    save_every_steps: 200
+    save_at_end: true
+  dataloader:
+    train_batch_size: 4
+    eval_batch_size: 4
+  optimizer:
+    lr: 2.0e-4
+    weight_decay: 0.0
+  data:
+    max_length: 512
+    num_preprocessing_workers: 1
+  peft:
+    enabled: true
+    method: lora
+    task_type: CAUSAL_LM
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+    bias: none
+    target_modules: null
+    target_modules_strategy: auto
+    modules_to_save: null
+

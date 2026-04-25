@@ -1,30 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Lists the GPU experiment commands to run (DDP/FSDP scaling + profiling).
-#
-# Usage:
-#   bash gpu_exp.sh
-#   bash gpu_exp.sh 500
+# Runs the full GPU experiment matrix. Safe to rerun:
+# - scaling entrypoints default to auto resume / skip-if-complete
+# - profiling wrappers skip once their report files already exist
 
-MAX_STEPS="${1:-500}"
+SCALING_MAX_STEPS="${SCALING_MAX_STEPS:-${1:-500}}"
+PROFILE_NPROC="${PROFILE_NPROC:-4}"
+PROFILE_MAX_STEPS="${PROFILE_MAX_STEPS:-200}"
 
-cat <<EOF
-DDP scaling (weak scaling; eval disabled):
-  torchrun --standalone --nproc_per_node=1 experiments/ddp_scaling.py --max-steps ${MAX_STEPS}
-  torchrun --standalone --nproc_per_node=2 experiments/ddp_scaling.py --max-steps ${MAX_STEPS}
-  torchrun --standalone --nproc_per_node=4 experiments/ddp_scaling.py --max-steps ${MAX_STEPS}
+run_cmd() {
+  echo
+  echo "[gpu_exp] $*"
+  "$@"
+}
 
-FSDP scaling (weak scaling; eval disabled):
-  torchrun --standalone --nproc_per_node=1 experiments/fsdp_scaling.py --max-steps ${MAX_STEPS}
-  torchrun --standalone --nproc_per_node=2 experiments/fsdp_scaling.py --max-steps ${MAX_STEPS}
-  torchrun --standalone --nproc_per_node=4 experiments/fsdp_scaling.py --max-steps ${MAX_STEPS}
+run_cmd bash scripts/profile_ddp.sh "${PROFILE_NPROC}" "${PROFILE_MAX_STEPS}"
+run_cmd bash scripts/profile_fsdp.sh "${PROFILE_NPROC}" "${PROFILE_MAX_STEPS}"
 
-Profiling wrappers (plain + nsys + ncu if available):
-  bash scripts/profile_ddp.sh 4
-  bash scripts/profile_fsdp.sh 4
+run_cmd torchrun --standalone --nproc_per_node=1 experiments/ddp_scaling.py --max-steps "${SCALING_MAX_STEPS}"
+run_cmd torchrun --standalone --nproc_per_node=2 experiments/ddp_scaling.py --max-steps "${SCALING_MAX_STEPS}"
+run_cmd torchrun --standalone --nproc_per_node=4 experiments/ddp_scaling.py --max-steps "${SCALING_MAX_STEPS}"
 
-Resume (example):
-  torchrun --standalone --nproc_per_node=4 experiments/ddp_scaling.py --mode resume --resume-version latest
-EOF
-
+run_cmd torchrun --standalone --nproc_per_node=1 experiments/fsdp_scaling.py --max-steps "${SCALING_MAX_STEPS}"
+run_cmd torchrun --standalone --nproc_per_node=2 experiments/fsdp_scaling.py --max-steps "${SCALING_MAX_STEPS}"
+run_cmd torchrun --standalone --nproc_per_node=4 experiments/fsdp_scaling.py --max-steps "${SCALING_MAX_STEPS}"

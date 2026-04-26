@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -64,6 +65,16 @@ class RuntimeTracker:
     _cuda_start_event: Optional[torch.cuda.Event] = field(default=None, init=False, repr=False)
     _cuda_end_event: Optional[torch.cuda.Event] = field(default=None, init=False, repr=False)
 
+    def _use_cuda_events(self) -> bool:
+        if not (self.device and torch.device(self.device).type == "cuda"):
+            return False
+        # Nsight Compute range replay can fail if timing events straddle the
+        # capture boundary. During profiler-driven runs, use synchronized wall
+        # clock timing instead of CUDA events to keep the capture window clean.
+        if os.environ.get("HPML_PROFILE_CUDA", "0") == "1":
+            return False
+        return True
+
 
     def start_run(self) -> None:
         self._run_start_time = time.perf_counter()
@@ -78,22 +89,27 @@ class RuntimeTracker:
         return self.total_runtime_seconds
 
     def start_step(self) -> None:
-        if self.device and torch.device(self.device).type == "cuda":
+        if self._use_cuda_events():
             torch.cuda.synchronize()
             self._cuda_start_event = torch.cuda.Event(enable_timing=True)
             self._cuda_end_event = torch.cuda.Event(enable_timing=True)
             self._cuda_start_event.record()
+        elif self.device and torch.device(self.device).type == "cuda":
+            torch.cuda.synchronize()
+            self._step_start_time = time.perf_counter()
         else:
             self._step_start_time = time.perf_counter()
 
     def end_step(self, samples: int = 0, tokens: int = 0) -> float:
-        if self.device and torch.device(self.device).type == "cuda":
+        if self._use_cuda_events():
             self._cuda_end_event.record()
             torch.cuda.synchronize()
             step_time = self._cuda_start_event.elapsed_time(self._cuda_end_event) / 1000.0
         else:
             if self._step_start_time is None:
                 raise RuntimeError("start_step() must be called before end_step().")
+            if self.device and torch.device(self.device).type == "cuda":
+                torch.cuda.synchronize()
             step_time = time.perf_counter() - self._step_start_time
             self._step_start_time = None
         # ...existing stats update...

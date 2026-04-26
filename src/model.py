@@ -60,7 +60,7 @@ def load_model(
         model_name,
         cache_dir=cache_dir,
         local_files_only=local_files_only,
-        torch_dtype=dtype,
+        dtype=dtype,
         trust_remote_code=bool(config.get("trust_remote_code", False)),
     )
     model.config.use_cache = bool(config.get("use_cache", True))

@@ -140,6 +140,16 @@ def apply_peft_to_model(
         modules_to_save=_normalize_modules_to_save(peft_config.get("modules_to_save")),
     )
     wrapped_model = get_peft_model(model, lora_config)
+
+    # FSDP flattening requires uniform parameter dtype within a flattened group.
+    # Some PEFT/LoRA params may be created in fp32 even when the base model is bf16/fp16.
+    # Align trainable parameters to the base model dtype to avoid mixed-dtype flatten errors.
+    base_dtype = next((p.dtype for p in model.parameters()), None)
+    if base_dtype is not None:
+        for param in wrapped_model.parameters():
+            if param.requires_grad and param.dtype != base_dtype:
+                param.data = param.data.to(dtype=base_dtype)
+
     metadata = build_lora_metadata(
         peft_config=peft_config,
         resolved_target_modules=resolved_target_modules,

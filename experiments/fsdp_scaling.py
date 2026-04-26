@@ -47,6 +47,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=["auto", "new", "resume"], default="auto")
     parser.add_argument("--resume-version", type=str, default=None)
     parser.add_argument("--max-steps", type=int, default=500)
+    parser.add_argument("--train-batch-size", type=int, default=None)
+    parser.add_argument("--max-length", type=int, default=None)
+    parser.add_argument("--dtype", choices=["fp32", "fp16", "bf16"], default=None)
+    parser.add_argument("--peft", choices=["on", "off"], default=None)
+    parser.add_argument("--eval", choices=["on", "off"], default=None)
+    parser.add_argument("--eval-every-steps", type=int, default=None)
     parser.add_argument("--output-root", type=str, default=None)
     parser.add_argument("--run-label", type=str, default=None, help="Optional suffix label for experiment name.")
     parser.add_argument("--dry-run", action="store_true")
@@ -64,6 +70,21 @@ def main() -> None:
     exp["overrides"]["profile"]["cuda_profiler"] = bool(int(os.environ.get("HPML_PROFILE_CUDA", "0")))
     exp["overrides"]["profile"]["warmup_steps"] = int(os.environ.get("HPML_PROFILE_WARMUP_STEPS", "0"))
     exp["overrides"]["profile"]["active_steps"] = int(os.environ.get("HPML_PROFILE_ACTIVE_STEPS", "0"))
+
+    if args.train_batch_size is not None:
+        exp.setdefault("overrides", {}).setdefault("dataloader", {})["train_batch_size"] = int(args.train_batch_size)
+        exp["overrides"]["dataloader"]["eval_batch_size"] = int(args.train_batch_size)
+    if args.max_length is not None:
+        exp.setdefault("overrides", {}).setdefault("data", {})["max_length"] = int(args.max_length)
+    if args.dtype is not None:
+        exp.setdefault("overrides", {}).setdefault("model", {})["dtype"] = str(args.dtype)
+    if args.peft is not None:
+        exp.setdefault("overrides", {}).setdefault("peft", {})["enabled"] = args.peft == "on"
+    if args.eval is not None:
+        exp.setdefault("overrides", {}).setdefault("evaluation", {})["enabled"] = args.eval == "on"
+    if args.eval_every_steps is not None:
+        exp.setdefault("overrides", {}).setdefault("training", {})["eval_every_steps"] = int(args.eval_every_steps)
+
     exp["name"] = f"{exp['name']}_{world_size}gpu"
 
     if args.output_root is not None:

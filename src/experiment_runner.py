@@ -105,13 +105,15 @@ def resolve_run_dir(output_root, experiment_name, mode, resume_version=None, dry
     if mode == "resume":
         return resolve_versioned_run_dir(output_root, experiment_name, resume_version)
     if mode == "auto":
-        resolved_mode, resolved_run_dir = resolve_auto_run_state(output_root, experiment_name)
+        resolved_mode, resolved_run_dir = resolve_auto_run_state(
+            output_root, experiment_name)
         if resolved_mode == "new":
             if dry_run:
                 return _next_versioned_run_dir(output_root, experiment_name)
             return make_versioned_output_dir(output_root, experiment_name)
         if resolved_run_dir is None:
-            raise FileNotFoundError(f"Unable to resolve run dir for experiment: {experiment_name}")
+            raise FileNotFoundError(
+                f"Unable to resolve run dir for experiment: {experiment_name}")
         return resolved_run_dir
     raise ValueError(f"Unsupported run mode: {mode}")
 
@@ -122,7 +124,8 @@ def _validate_supported_features(config, experiment_name):
         method = str(peft_cfg.get("method", "lora")).lower()
         if method != "lora":
             raise ExperimentNotImplementedError(
-                f"Experiment '{experiment_name}' requests PEFT method '{method}', but only 'lora' is implemented."
+                f"Experiment '{experiment_name}' requests PEFT method '{
+                    method}', but only 'lora' is implemented."
             )
 
     # DDP/FSDP are supported; keep this for future methods (pipeline parallel, etc).
@@ -130,14 +133,16 @@ def _validate_supported_features(config, experiment_name):
     execution_mode = str(execution_cfg.get("mode", "single_gpu")).lower()
     if execution_mode not in {"single_gpu", "ddp", "fsdp"}:
         raise ExperimentNotImplementedError(
-            f"Experiment '{experiment_name}' requests unsupported execution.mode '{execution_mode}'."
+            f"Experiment '{experiment_name}' requests unsupported execution.mode '{
+                execution_mode}'."
         )
 
     training_cfg = config.get("training", {}) or {}
     runtime_cfg = config.get("runtime", {}) or {}
     if training_cfg.get("gradient_checkpointing", False) or runtime_cfg.get("gradient_checkpointing", False):
         raise ExperimentNotImplementedError(
-            f"Experiment '{experiment_name}' requests gradient checkpointing, but it is not implemented yet."
+            f"Experiment '{
+                experiment_name}' requests gradient checkpointing, but it is not implemented yet."
         )
 
 
@@ -161,7 +166,8 @@ def _build_scheduler(optimizer, train_dataloader, config):
     training_config = config.get("training", {}) or {}
     num_epochs = int(training_config.get("num_epochs", 1))
     max_steps = training_config.get("max_steps")
-    total_steps = int(max_steps) if max_steps is not None else len(train_dataloader) * num_epochs
+    total_steps = int(max_steps) if max_steps is not None else len(
+        train_dataloader) * num_epochs
     return get_scheduler(
         name=scheduler_config.get("name", "linear"),
         optimizer=optimizer,
@@ -177,12 +183,16 @@ def apply_lora_and_persist(model, config, run_dir, logger):
     model, peft_metadata = apply_peft_to_model(model, peft_config)
     if peft_metadata.get("enabled"):
         config.setdefault("peft", {})
-        config["peft"]["resolved_target_modules"] = peft_metadata.get("target_modules")
+        config["peft"]["resolved_target_modules"] = peft_metadata.get(
+            "target_modules")
         config["peft"]["target_modules"] = peft_metadata.get("target_modules")
-        config["peft"]["target_modules_source"] = peft_metadata.get("target_modules_source")
+        config["peft"]["target_modules_source"] = peft_metadata.get(
+            "target_modules_source")
 
-        logger.info("PEFT enabled. Target modules source: %s", peft_metadata.get("target_modules_source"))
-        logger.info("PEFT target modules: %s", peft_metadata.get("target_modules"))
+        logger.info("PEFT enabled. Target modules source: %s",
+                    peft_metadata.get("target_modules_source"))
+        logger.info("PEFT target modules: %s",
+                    peft_metadata.get("target_modules"))
         save_json(peft_metadata, run_dir / "resolved_peft_config.json")
     return model, peft_metadata
 
@@ -190,7 +200,8 @@ def apply_lora_and_persist(model, config, run_dir, logger):
 def _load_resume_config(run_dir):
     config_path = Path(run_dir) / "config.yaml"
     if not config_path.exists():
-        raise FileNotFoundError(f"Resume requested but config not found: {config_path}")
+        raise FileNotFoundError(
+            f"Resume requested but config not found: {config_path}")
     return load_config(config_path, default=default_config())
 
 
@@ -216,7 +227,8 @@ def run_experiment(exp, dry_run=False):
     overrides = exp.get("overrides") or {}
     artifacts = exp.get("artifacts") or {}
     results_filename = artifacts.get("results_filename", "final_results.json")
-    save_eval_metrics_json = bool(artifacts.get("save_eval_metrics_json", False))
+    save_eval_metrics_json = bool(
+        artifacts.get("save_eval_metrics_json", False))
 
     base_config_path = (PROJECT_ROOT / base_config).resolve()
     if not base_config_path.exists():
@@ -225,7 +237,8 @@ def run_experiment(exp, dry_run=False):
     if device_config:
         device_config_path = (PROJECT_ROOT / device_config).resolve()
         if not device_config_path.exists():
-            raise FileNotFoundError(f"device_config not found: {device_config_path}")
+            raise FileNotFoundError(f"device_config not found: {
+                                    device_config_path}")
 
     bootstrap_config = load_effective_config(
         base_config_path=base_config_path,
@@ -238,17 +251,20 @@ def run_experiment(exp, dry_run=False):
     execution_cfg = bootstrap_config.get("execution", {}) or {}
     distributed_cfg = bootstrap_config.get("distributed", {}) or {}
     execution_mode = str(execution_cfg.get("mode", "single_gpu")).lower()
-    distributed_enabled = bool(distributed_cfg.get("enabled", False)) or execution_mode in {"ddp", "fsdp"}
+    distributed_enabled = bool(distributed_cfg.get(
+        "enabled", False)) or execution_mode in {"ddp", "fsdp"}
     launched_world_size = int(get_world_size()) if distributed_enabled else 1
 
     if distributed_enabled and is_distributed():
-        init_distributed(backend=str(distributed_cfg.get("backend", "nccl") or "nccl"))
+        init_distributed(backend=str(
+            distributed_cfg.get("backend", "nccl") or "nccl"))
 
     effective_mode = mode
     if mode == "auto":
         if distributed_enabled and is_distributed():
             if is_main_process():
-                auto_mode, auto_run_dir = resolve_auto_run_state(output_root, name, results_filename=results_filename)
+                auto_mode, auto_run_dir = resolve_auto_run_state(
+                    output_root, name, results_filename=results_filename)
                 resolved_run_dir = auto_run_dir
                 if resolved_run_dir is None:
                     resolved_run_dir = resolve_run_dir(
@@ -264,7 +280,8 @@ def run_experiment(exp, dry_run=False):
             effective_mode, run_dir = broadcast_object(payload, src=0)
             barrier()
         else:
-            effective_mode, auto_run_dir = resolve_auto_run_state(output_root, name, results_filename=results_filename)
+            effective_mode, auto_run_dir = resolve_auto_run_state(
+                output_root, name, results_filename=results_filename)
             run_dir = auto_run_dir if auto_run_dir is not None else resolve_run_dir(
                 output_root,
                 name,
@@ -287,7 +304,8 @@ def run_experiment(exp, dry_run=False):
         run_dir = resolved_run_dir
         barrier()
     else:
-        run_dir = resolve_run_dir(output_root, name, effective_mode, resume_version=resume_version, dry_run=dry_run)
+        run_dir = resolve_run_dir(
+            output_root, name, effective_mode, resume_version=resume_version, dry_run=dry_run)
 
     if mode == "auto" and effective_mode == "skip":
         if distributed_enabled and is_distributed():
@@ -299,7 +317,8 @@ def run_experiment(exp, dry_run=False):
         return run_dir
 
     # For resume correctness: load the exact config used to create this run dir.
-    config = _load_resume_config(run_dir) if effective_mode == "resume" else bootstrap_config
+    config = _load_resume_config(
+        run_dir) if effective_mode == "resume" else bootstrap_config
     config["run_name"] = name
     config.setdefault("distributed", {})
     config["distributed"]["world_size"] = launched_world_size
@@ -315,10 +334,12 @@ def run_experiment(exp, dry_run=False):
         rank_suffix = f".rank{dist.get_rank()}"
         if not is_main_process():
             filename = f"run{rank_suffix}.log"
-    logger = setup_logger(f"experiment.{name}.{Path(run_dir).name}{rank_suffix}", output_dir=run_dir, filename=filename)
+    logger = setup_logger(f"experiment.{name}.{Path(run_dir).name}{
+                          rank_suffix}", output_dir=run_dir, filename=filename)
     if exp.get("description"):
         logger.info("Description: %s", exp.get("description"))
-    logger.info("Starting experiment '%s' (%s) at %s", name, effective_mode, run_dir)
+    logger.info("Starting experiment '%s' (%s) at %s",
+                name, effective_mode, run_dir)
 
     set_random_seed(int(config.get("seed", 42)))
 
@@ -332,7 +353,8 @@ def run_experiment(exp, dry_run=False):
         config["model"]["device"] = f"cuda:{local_rank}"
 
     model, tokenizer, device = load_model_and_tokenizer(config)
-    model, peft_metadata = apply_lora_and_persist(model, config, Path(run_dir), logger)
+    model, peft_metadata = apply_lora_and_persist(
+        model, config, Path(run_dir), logger)
 
     if is_main_process() or not (distributed_enabled and is_distributed()):
         save_config(config, Path(run_dir) / "config.yaml")
@@ -352,8 +374,10 @@ def run_experiment(exp, dry_run=False):
 
     from src.data import build_dataloaders
 
-    include_eval = bool((config.get("evaluation", {}) or {}).get("enabled", True))
-    dataloaders = build_dataloaders(tokenizer=tokenizer, config=config, include_generation_eval=include_eval)
+    include_eval = bool((config.get("evaluation", {})
+                        or {}).get("enabled", True))
+    dataloaders = build_dataloaders(
+        tokenizer=tokenizer, config=config, include_generation_eval=include_eval)
     optimizer = _build_optimizer(model, config)
     scheduler = _build_scheduler(optimizer, dataloaders["train"], config)
 
@@ -363,11 +387,13 @@ def run_experiment(exp, dry_run=False):
         from torch.nn.parallel import DistributedDataParallel
 
         if execution_mode == "ddp":
-            model = DistributedDataParallel(model, device_ids=[get_local_rank()])
+            model = DistributedDataParallel(
+                model, device_ids=[get_local_rank()])
         elif execution_mode == "fsdp":
             from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-            model = FSDP(model, device_id=get_local_rank(), use_orig_params=True)
+            model = FSDP(model, device_id=get_local_rank(),
+                         use_orig_params=True)
         trainer_cls = DistributedTrainer
 
     eval_dataset = None
@@ -394,7 +420,8 @@ def run_experiment(exp, dry_run=False):
         trainer.resume_from_latest_checkpoint()
 
     logger.info("Device: %s", device)
-    logger.info("Total parameters before training: %s", count_parameters(model))
+    logger.info("Total parameters before training: %s",
+                count_parameters(model))
     results = trainer.train()
     results["peft"] = peft_metadata
     results["launch"] = {"world_size": launched_world_size}
@@ -403,8 +430,10 @@ def run_experiment(exp, dry_run=False):
         results_path = Path(run_dir) / str(results_filename)
         save_json(results, results_path)
         if save_eval_metrics_json:
-            save_json(results.get("eval", {}), Path(run_dir) / "eval_metrics.json")
-        logger.info("Finished experiment '%s'. Results saved to %s", name, results_path)
+            save_json(results.get("eval", {}), Path(
+                run_dir) / "eval_metrics.json")
+        logger.info("Finished experiment '%s'. Results saved to %s",
+                    name, results_path)
     barrier()
     if distributed_enabled and is_distributed():
         destroy_distributed()

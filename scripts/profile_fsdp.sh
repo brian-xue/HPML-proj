@@ -34,7 +34,6 @@ if command -v nsys >/dev/null 2>&1; then
       -o "${NSYS_PREFIX}" \
       --trace=cuda,nvtx,osrt,nccl,cublas,cudnn \
       --capture-range=cudaProfilerApi \
-      --stop-on-range-end=true \
       torchrun --standalone --nproc_per_node="${NPROC}" "${EXP}" --max-steps "${PROFILE_MAX_STEPS}" --run-label "${NSYS_LABEL}"
   fi
 else

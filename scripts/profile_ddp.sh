@@ -13,30 +13,32 @@ if ! command -v torchrun >/dev/null 2>&1; then
 fi
 
 EXP="experiments/ddp_scaling.py"
-NVPROF_PREFIX="output/nvprof_ddp_${NPROC}gpu"
+NSYS_PREFIX="output/nsys_ddp_${NPROC}gpu"
 NCU_PREFIX="output/ncu_ddp_${NPROC}gpu"
 PLAIN_LABEL="profile_plain"
-NVPROF_LABEL="profile_nvprof"
+NSYS_LABEL="profile_nsys"
 NCU_LABEL="profile_ncu_apprange"
 
 echo "[ddp] plain run: nproc=${NPROC} max_steps=${MAX_STEPS}"
 torchrun --standalone --nproc_per_node="${NPROC}" "${EXP}" --max-steps "${MAX_STEPS}" --run-label "${PLAIN_LABEL}"
 
-if command -v nvprof >/dev/null 2>&1; then
-  if ls "${NVPROF_PREFIX}"* >/dev/null 2>&1; then
-    echo "[ddp] nvprof outputs already exist for nproc=${NPROC}; skipping."
+if command -v nsys >/dev/null 2>&1; then
+  if ls "${NSYS_PREFIX}"* >/dev/null 2>&1; then
+    echo "[ddp] nsys outputs already exist for nproc=${NPROC}; skipping."
   else
-    echo "[ddp] nvprof run (warmup=${PROFILE_WARMUP_STEPS} active=${PROFILE_ACTIVE_STEPS})"
+    echo "[ddp] nsys run (warmup=${PROFILE_WARMUP_STEPS} active=${PROFILE_ACTIVE_STEPS})"
     HPML_PROFILE_CUDA=1 \
     HPML_PROFILE_WARMUP_STEPS="${PROFILE_WARMUP_STEPS}" \
     HPML_PROFILE_ACTIVE_STEPS="${PROFILE_ACTIVE_STEPS}" \
-    nvprof \
-      --profile-from-start off \
-      --log-file "${NVPROF_PREFIX}.log" \
-      torchrun --standalone --nproc_per_node="${NPROC}" "${EXP}" --max-steps "${PROFILE_MAX_STEPS}" --run-label "${NVPROF_LABEL}"
+    nsys profile \
+      -o "${NSYS_PREFIX}" \
+      --trace=cuda,nvtx,osrt,nccl,cublas,cudnn \
+      --capture-range=cudaProfilerApi \
+      --stop-on-range-end=true \
+      torchrun --standalone --nproc_per_node="${NPROC}" "${EXP}" --max-steps "${PROFILE_MAX_STEPS}" --run-label "${NSYS_LABEL}"
   fi
 else
-  echo "[ddp] nvprof not found; skipping profiler run." >&2
+  echo "[ddp] nsys not found; skipping Nsight Systems." >&2
 fi
 
 if command -v ncu >/dev/null 2>&1; then

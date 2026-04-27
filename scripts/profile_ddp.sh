@@ -17,7 +17,7 @@ NVPROF_PREFIX="output/nvprof_ddp_${NPROC}gpu"
 NCU_PREFIX="output/ncu_ddp_${NPROC}gpu"
 PLAIN_LABEL="profile_plain"
 NVPROF_LABEL="profile_nvprof"
-NCU_LABEL="profile_ncu"
+NCU_LABEL="profile_ncu_apprange"
 
 echo "[ddp] plain run: nproc=${NPROC} max_steps=${MAX_STEPS}"
 torchrun --standalone --nproc_per_node="${NPROC}" "${EXP}" --max-steps "${MAX_STEPS}" --run-label "${PLAIN_LABEL}"
@@ -47,7 +47,7 @@ if command -v ncu >/dev/null 2>&1; then
     HPML_PROFILE_CUDA=1 \
     HPML_PROFILE_WARMUP_STEPS="${PROFILE_WARMUP_STEPS}" \
     HPML_PROFILE_ACTIVE_STEPS="${PROFILE_ACTIVE_STEPS}" \
-    ncu --target-processes all --replay-mode range -o "${NCU_PREFIX}" \
+    ncu --target-processes all --replay-mode app-range -o "${NCU_PREFIX}" \
       torchrun --standalone --nproc_per_node="${NPROC}" "${EXP}" --max-steps "${PROFILE_MAX_STEPS}" --run-label "${NCU_LABEL}"
   fi
 else

@@ -222,6 +222,15 @@ def count_parameters(model: torch.nn.Module, trainable_only: bool = False) -> in
     return sum(param.numel() for param in parameters)
 
 
+def unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
+    current = model
+    visited: set[int] = set()
+    while hasattr(current, "module") and id(current) not in visited:
+        visited.add(id(current))
+        current = getattr(current, "module")
+    return current
+
+
 def get_device(device: Optional[str] = None) -> torch.device:
     if device:
         return torch.device(device)

@@ -166,7 +166,12 @@ class BaseTrainer:
 
     def should_evaluate(self) -> bool:
         eval_every = int(self.training_config.get("eval_every_steps", 0))
-        return eval_every > 0 and self.state.global_step > 0 and self.state.global_step % eval_every == 0
+        return (
+            self.eval_dataset is not None
+            and eval_every > 0
+            and self.state.global_step > 0
+            and self.state.global_step % eval_every == 0
+        )
 
     def should_checkpoint(self) -> bool:
         save_every = int(self.training_config.get("save_every_steps", 0))
@@ -245,9 +250,13 @@ class BaseTrainer:
             if step_metrics["optimizer_stepped"] and self.should_evaluate():
                 eval_results = self.evaluate()
                 metrics = eval_results.get("metrics", {})
-                self.logger.info("step=%s eval=%s", self.state.global_step, format_metrics(metrics))
+                if metrics:
+                    self.logger.info("step=%s eval=%s", self.state.global_step, format_metrics(metrics))
                 if self.should_checkpoint():
-                    self.maybe_checkpoint(metrics)
+                    if metrics:
+                        self.maybe_checkpoint(metrics)
+                    else:
+                        self.maybe_checkpoint()
             elif step_metrics["optimizer_stepped"] and self.should_checkpoint():
                 self.maybe_checkpoint()
 

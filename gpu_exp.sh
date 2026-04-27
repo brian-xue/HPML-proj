@@ -2,8 +2,10 @@
 set -euo pipefail
 
 # Runs the full GPU experiment matrix. Safe to rerun:
+# - regular scaling runs use explicit labels like trainonly / tta
+# - profiling wrappers use separate labels like profile_plain / profile_nvprof
 # - scaling entrypoints default to auto resume / skip-if-complete
-# - profiling wrappers skip once their report files already exist
+# - profiling wrappers skip once their profiler outputs already exist
 
 SCALING_MAX_STEPS="${SCALING_MAX_STEPS:-${1:-500}}"
 PROFILE_NPROC="${PROFILE_NPROC:-4}"

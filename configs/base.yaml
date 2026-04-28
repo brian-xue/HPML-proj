@@ -80,9 +80,26 @@ data:
 
   # Shared instruction template applied to every GSM8K question.
   instruction_template: |-
-    Solve the following math word problem. Show your reasoning before giving the final answer.
+    Solve the following math word problem. Show your reasoning, then end with a line in the form "#### <answer>".
+
+    Question: Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?
+    Reasoning: Natalia sold 48 clips in April. In May she sold half as many, so she sold 48 / 2 = 24 clips. Altogether she sold 48 + 24 = 72 clips.
+    #### 72
+
+    Question: Weng earns $12 an hour for babysitting. Yesterday, she babysat for 5 hours. How much did she earn?
+    Reasoning: Weng earns 12 dollars each hour. For 5 hours, she earned 12 * 5 = 60 dollars.
+    #### 60
+
+    Question: Betty has 24 marbles. She gives 8 marbles to her brother and then buys 5 more. How many marbles does Betty have now?
+    Reasoning: Betty starts with 24 marbles. After giving away 8, she has 24 - 8 = 16 marbles. Then she buys 5 more, so she has 16 + 5 = 21 marbles.
+    #### 21
+
+    Question: A restaurant has 9 tables. Each table seats 4 people. If 6 seats are empty, how many people are seated?
+    Reasoning: The restaurant has 9 * 4 = 36 total seats. Since 6 seats are empty, 36 - 6 = 30 people are seated.
+    #### 30
 
     Question: {question}
+    Reasoning:
 
 dataloader:
   # Training and evaluation batch sizes for the shared setup layer.
@@ -152,6 +169,33 @@ peft:
 
   # Optional list of extra modules to keep trainable and save with adapters.
   modules_to_save: null
+
+  # Optional per-module rank map used by GoRA after gradient-based initialization.
+  rank_pattern: null
+
+  # Shared initialization knobs for custom low-rank layers.
+  weight_a_init_method: null
+  weight_b_init_method: null
+  run_lora_in_fp32: false
+
+  # Number of train batches used to estimate full-rank gradients before GoRA init.
+  gradient_estimation_steps: 8
+
+  # GoRA-specific options. Ignored unless peft.method is set to gora.
+  gora_init_method: weight_svd
+  gora_max_rank: null
+  gora_min_rank: 1
+  gora_softmax_importance: false
+  gora_scale_by_lr: false
+  gora_lr: 1.0e-3
+  gora_features_func: null
+  gora_temperature: 0.5
+  gora_rank_stablize: false
+  gora_dynamic_scaling: false
+  gora_allocate_stretagy: moderate
+  gora_scale_importance: false
+  gora_importance_type: union_frobenius_norm
+  gora_stable_gemma: 0.02
 
 checkpoint:
   # Shared checkpoint directory naming and best-metric selection.

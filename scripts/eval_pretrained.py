@@ -55,7 +55,6 @@ def main() -> None:
     args = parse_args()
 
     from experiments.lora_benchmark import EXPERIMENT as LORA_EXPERIMENT
-    from src.data import apply_four_shot_cot_prompt
     from src.evaluator import evaluate_pretrained_generation
     from src.experiment_runner import load_effective_config
     from src.utils import (
@@ -77,7 +76,6 @@ def main() -> None:
         device_config_path=PROJECT_ROOT / device_config if device_config else None,
         overrides=overrides,
     )
-    config = apply_four_shot_cot_prompt(config)
     set_random_seed(int(config.get("seed", 42)))
 
     run_name = generate_run_name(config, prefix="pretrained_lora_settings_eval")

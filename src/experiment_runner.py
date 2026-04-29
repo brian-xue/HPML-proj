@@ -60,9 +60,9 @@ def _validate_supported_features(config, experiment_name):
     peft_cfg = config.get("peft", {}) or {}
     if peft_cfg.get("enabled", False):
         method = str(peft_cfg.get("method", "lora")).lower()
-        if method != "lora":
+        if method not in {"lora", "gora"}:
             raise ExperimentNotImplementedError(
-                f"Experiment '{experiment_name}' requests PEFT method '{method}', but only 'lora' is implemented."
+                f"Experiment '{experiment_name}' requests PEFT method '{method}', but only 'lora' and 'gora' are implemented."
             )
 
     distributed_cfg = config.get("distributed", {}) or {}
@@ -119,6 +119,8 @@ def apply_lora_and_persist(model, config, run_dir, logger):
         config["peft"]["resolved_target_modules"] = peft_metadata.get("target_modules")
         config["peft"]["target_modules"] = peft_metadata.get("target_modules")
         config["peft"]["target_modules_source"] = peft_metadata.get("target_modules_source")
+        if peft_metadata.get("gora_rank_pattern") is not None:
+            config["peft"]["rank_pattern"] = peft_metadata.get("gora_rank_pattern")
 
         logger.info("PEFT enabled. Target modules source: %s", peft_metadata.get("target_modules_source"))
         logger.info("PEFT target modules: %s", peft_metadata.get("target_modules"))
@@ -192,12 +194,12 @@ def run_experiment(exp, dry_run=False):
 
     from src.data import build_dataloaders
     from src.model import load_model_and_tokenizer
+    from src.peft import initialize_gora
     from src.trainer_base import BaseTrainer
 
     model, tokenizer, device = load_model_and_tokenizer(config)
     model, peft_metadata = apply_lora_and_persist(model, config, Path(run_dir), logger)
 
-    save_config(config, Path(run_dir) / "config.yaml")
     save_json(
         {
             "name": name,
@@ -211,6 +213,33 @@ def run_experiment(exp, dry_run=False):
     )
 
     dataloaders = build_dataloaders(tokenizer=tokenizer, config=config)
+    if peft_metadata.get("enabled") and peft_metadata.get("method") == "gora" and not config.get("peft", {}).get("rank_pattern"):
+        logger.info(
+            "Initializing GoRA with %s gradient-estimation steps.",
+            config.get("peft", {}).get("gradient_estimation_steps", 8),
+        )
+        gora_metadata = initialize_gora(
+            model=model,
+            train_dataloader=dataloaders["train"],
+            device=device,
+            peft_config=config["peft"],
+        )
+        peft_metadata.update(
+            {
+                "gora_rank_pattern": gora_metadata.get("rank_pattern", {}),
+                "gora_importance_scores": gora_metadata.get("importance_scores", {}),
+                "gradient_estimation_steps": gora_metadata.get("gradient_estimation_steps"),
+                "gora_total_budget": gora_metadata.get("total_budget"),
+                "gora_actual_trainable": gora_metadata.get("actual_trainable"),
+                "trainable_parameters": gora_metadata.get("trainable_parameters", peft_metadata.get("trainable_parameters")),
+                "trainable_ratio": gora_metadata.get("trainable_ratio", peft_metadata.get("trainable_ratio")),
+            }
+        )
+        config.setdefault("peft", {})["rank_pattern"] = gora_metadata.get("rank_pattern", {})
+        logger.info("GoRA initialized with rank pattern: %s", config["peft"]["rank_pattern"])
+        save_json(peft_metadata, Path(run_dir) / "resolved_peft_config.json")
+
+    save_config(config, Path(run_dir) / "config.yaml")
     optimizer = _build_optimizer(model, config)
     scheduler = _build_scheduler(optimizer, dataloaders["train"], config)
 

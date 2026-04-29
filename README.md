@@ -95,9 +95,10 @@ Implements shared checkpoint handling:
 
 ### `src/peft.py`
 
-Implements shared LoRA support:
+Implements shared PEFT support:
 
 - config-driven LoRA wrapping via `peft`
+- custom GoRA layer replacement and gradient-driven rank initialization
 - auto-detection of target projection layers for Qwen-style models
 - support for explicit fixed `target_modules`
 - resolved target-module reporting for reproducible follow-up runs
@@ -146,7 +147,7 @@ Standalone pretrained baseline evaluation script that:
 - delegates model/dataloader/generation evaluation to `src.evaluator`
 - evaluates the base model without requiring a checkpoint
 - disables PEFT so the model remains pretrained-only
-- uses the shared 4-shot chain-of-thought prompt from `src.data`
+- inherits the shared default 4-shot chain-of-thought prompt
 - supports quick subset runs with `--max-examples`
 - optionally fails when accuracy is below `--min-accuracy`
 - saves metrics and per-example predictions to JSON

@@ -17,10 +17,20 @@ Run the LoRA benchmark:
 python3 experiments/lora_benchmark.py
 ```
 
+Run the GoRA benchmark:
+
+```bash
+python3 experiments/gora_benchmark.py
+```
+
 Dry-run (validate and show the resolved output directory without launching training):
 
 ```bash
 python3 experiments/lora_benchmark.py --dry-run
+```
+
+```bash
+python3 experiments/gora_benchmark.py --dry-run
 ```
 
 ## Output layout

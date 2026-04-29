@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
@@ -9,6 +10,7 @@ import torch
 from src.checkpoint import get_latest_checkpoint_dir, load_checkpoint, maybe_save_best_checkpoint, save_checkpoint
 from src.evaluator import evaluate_generation
 from src.metrics import RuntimeTracker
+from src.model import resolve_torch_dtype
 from src.utils import format_metrics, move_batch_to_device
 
 
@@ -83,9 +85,27 @@ class BaseTrainer:
     def checkpoint_config(self) -> Mapping[str, Any]:
         return self.config.get("checkpoint", {})
 
+    @property
+    def runtime_config(self) -> Mapping[str, Any]:
+        return self.config.get("runtime", {})
+
     def compute_loss(self, batch: Mapping[str, torch.Tensor]) -> torch.Tensor:
         outputs = self.model(**batch)
         return outputs.loss
+
+    def _get_training_context(self):
+        if not bool(self.runtime_config.get("autocast", False)):
+            return nullcontext()
+        if self.device.type != "cuda":
+            return nullcontext()
+
+        autocast_dtype = resolve_torch_dtype(self.config.get("model", {}).get("dtype"))
+        if autocast_dtype is None or autocast_dtype == torch.float32:
+            return nullcontext()
+        if autocast_dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+            raise RuntimeError("runtime.autocast=true with model.dtype=bf16 requires CUDA bf16 support.")
+
+        return torch.autocast(device_type="cuda", dtype=autocast_dtype)
 
     def load_state(self, metadata: Mapping[str, Any]) -> None:
         self.state = TrainerState.from_dict(metadata)
@@ -120,7 +140,8 @@ class BaseTrainer:
         batch = move_batch_to_device(batch, self.device)
 
         gradient_accumulation_steps = int(self.training_config.get("gradient_accumulation_steps", 1))
-        loss = self.compute_loss(batch)
+        with self._get_training_context():
+            loss = self.compute_loss(batch)
         scaled_loss = loss / gradient_accumulation_steps
         scaled_loss.backward()
         self._grad_accum_counter += 1

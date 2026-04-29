@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
@@ -10,6 +11,7 @@ from src.checkpoint import get_latest_checkpoint_dir, load_checkpoint, maybe_sav
 from src.evaluator import evaluate_generation
 from src.metrics import RuntimeTracker
 from src.profiler import CudaProfileWindow
+from src.model import resolve_torch_dtype
 from src.utils import format_metrics, move_batch_to_device
 
 
@@ -85,9 +87,29 @@ class BaseTrainer:
     def checkpoint_config(self) -> Mapping[str, Any]:
         return self.config.get("checkpoint", {})
 
+    @property
+    def runtime_config(self) -> Mapping[str, Any]:
+        return self.config.get("runtime", {})
+
     def compute_loss(self, batch: Mapping[str, torch.Tensor]) -> torch.Tensor:
         outputs = self.model(**batch)
         return outputs.loss
+
+    def _get_training_context(self):
+        if not bool(self.runtime_config.get("autocast", False)):
+            return nullcontext()
+        if self.device.type != "cuda":
+            return nullcontext()
+
+        autocast_dtype = resolve_torch_dtype(
+            self.config.get("model", {}).get("dtype"))
+        if autocast_dtype is None or autocast_dtype == torch.float32:
+            return nullcontext()
+        if autocast_dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+            raise RuntimeError(
+                "runtime.autocast=true with model.dtype=bf16 requires CUDA bf16 support.")
+
+        return torch.autocast(device_type="cuda", dtype=autocast_dtype)
 
     def load_state(self, metadata: Mapping[str, Any]) -> None:
         self.state = TrainerState.from_dict(metadata)
@@ -98,7 +120,8 @@ class BaseTrainer:
             self.output_dir,
             dir_name=self.checkpoint_config.get("dir_name", "checkpoints"),
         )
-        save_trainable_only = bool(self.checkpoint_config.get("save_trainable_only", False))
+        save_trainable_only = bool(
+            self.checkpoint_config.get("save_trainable_only", False))
         metadata = load_checkpoint(
             checkpoint_dir=checkpoint_dir,
             model=self.model,
@@ -124,14 +147,20 @@ class BaseTrainer:
         batch = move_batch_to_device(batch, self.device)
 
         profile_cfg = self.config.get("profile", {}) or {}
-        nvtx_enabled = bool(profile_cfg.get("nvtx", False)) and self.device.type == "cuda" and torch.cuda.is_available()
+        nvtx_enabled = bool(profile_cfg.get(
+            "nvtx", False)) and self.device.type == "cuda" and torch.cuda.is_available()
 
-        gradient_accumulation_steps = int(self.training_config.get("gradient_accumulation_steps", 1))
+        gradient_accumulation_steps = int(
+            self.training_config.get("gradient_accumulation_steps", 1))
+
         if nvtx_enabled:
             torch.cuda.nvtx.range_push("forward_loss")
         loss = self.compute_loss(batch)
         if nvtx_enabled:
             torch.cuda.nvtx.range_pop()
+
+        with self._get_training_context():
+            loss = self.compute_loss(batch)
 
         scaled_loss = loss / gradient_accumulation_steps
         if nvtx_enabled:
@@ -193,7 +222,8 @@ class BaseTrainer:
 
             self.runtime.start_step()
             step_metrics = self.training_step(batch)
-            step_time_s = self.runtime.end_step(samples=batch_size, tokens=token_count)
+            step_time_s = self.runtime.end_step(
+                samples=batch_size, tokens=token_count)
             self._log_interval_tokens += token_count
             self._log_interval_step_time_s += step_time_s
 
@@ -208,9 +238,12 @@ class BaseTrainer:
                 )
                 gpu_mem = None
                 if self.device.type == "cuda" and torch.cuda.is_available():
-                    gpu_mem = torch.cuda.memory_allocated(self.device) / (1024 ** 2)
-                    reserved_mem = torch.cuda.memory_reserved(self.device) / (1024 ** 2)
-                    max_gpu_mem = torch.cuda.max_memory_allocated(self.device) / (1024 ** 2)
+                    gpu_mem = torch.cuda.memory_allocated(
+                        self.device) / (1024 ** 2)
+                    reserved_mem = torch.cuda.memory_reserved(
+                        self.device) / (1024 ** 2)
+                    max_gpu_mem = torch.cuda.max_memory_allocated(
+                        self.device) / (1024 ** 2)
                     self.logger.info(
                         "epoch=%s step=%s %s",
                         epoch,
@@ -251,7 +284,8 @@ class BaseTrainer:
                 eval_results = self.evaluate()
                 metrics = eval_results.get("metrics", {})
                 if metrics:
-                    self.logger.info("step=%s eval=%s", self.state.global_step, format_metrics(metrics))
+                    self.logger.info(
+                        "step=%s eval=%s", self.state.global_step, format_metrics(metrics))
                 if self.should_checkpoint():
                     if metrics:
                         self.maybe_checkpoint(metrics)
@@ -289,9 +323,11 @@ class BaseTrainer:
             if self.state.best_metric_value is None:
                 should_update_best = True
             elif metric_mode == "max":
-                should_update_best = metric_value > float(self.state.best_metric_value)
+                should_update_best = metric_value > float(
+                    self.state.best_metric_value)
             else:
-                should_update_best = metric_value < float(self.state.best_metric_value)
+                should_update_best = metric_value < float(
+                    self.state.best_metric_value)
 
             if should_update_best:
                 self.state.best_metric_name = metric_name
@@ -306,7 +342,8 @@ class BaseTrainer:
             global_step=self.state.global_step,
             metadata=self.state.as_dict(),
             dir_name=dir_name,
-            save_trainable_only=bool(self.checkpoint_config.get("save_trainable_only", False)),
+            save_trainable_only=bool(
+                self.checkpoint_config.get("save_trainable_only", False)),
         )
 
         if metric_value is None:
@@ -340,7 +377,8 @@ class BaseTrainer:
                 if self._grad_accum_counter > 0 and not self.should_stop():
                     self._perform_optimizer_step()
 
-                eval_results = self.evaluate() if self.eval_dataset is not None else {"metrics": {}}
+                eval_results = self.evaluate() if self.eval_dataset is not None else {
+                    "metrics": {}}
                 final_results["eval"] = eval_results
                 if self.training_config.get("save_at_end", True) or self.should_checkpoint():
                     self.maybe_checkpoint(eval_results.get("metrics", {}))
@@ -349,7 +387,8 @@ class BaseTrainer:
                     **train_metrics,
                     **eval_results.get("metrics", {}),
                 }
-                self.logger.info("epoch=%s summary=%s", epoch, format_metrics(summary))
+                self.logger.info("epoch=%s summary=%s", epoch,
+                                 format_metrics(summary))
                 self.state.epoch_step = 0
                 if self.should_stop():
                     break

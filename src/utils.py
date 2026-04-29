@@ -14,6 +14,8 @@ import numpy as np
 import torch
 import yaml
 
+from src.prompts import DEFAULT_GSM8K_INSTRUCTION_TEMPLATE
+
 
 DEFAULT_MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
 
@@ -343,7 +345,7 @@ def default_config() -> Dict[str, Any]:
             "pack_to_max_length": False,
             "append_eos_token": True,
             "system_prompt": "You are a helpful math reasoning assistant. Solve the problem carefully and end with a final answer.",
-            "instruction_template": "Solve the following math word problem. Show your reasoning before giving the final answer.\n\nQuestion: {question}",
+            "instruction_template": DEFAULT_GSM8K_INSTRUCTION_TEMPLATE,
         },
         "dataloader": {
             "train_batch_size": 8,
@@ -372,6 +374,9 @@ def default_config() -> Dict[str, Any]:
             "save_at_end": True,
             "resume_from": None,
         },
+        "runtime": {
+            "autocast": False,
+        },
         "generation": {
             "max_new_tokens": 128,
             "temperature": 0.0,
@@ -390,6 +395,25 @@ def default_config() -> Dict[str, Any]:
             "target_modules": None,
             "target_modules_strategy": "auto",
             "modules_to_save": None,
+            "weight_a_init_method": None,
+            "weight_b_init_method": None,
+            "run_lora_in_fp32": False,
+            "rank_pattern": None,
+            "gradient_estimation_steps": 8,
+            "gora_init_method": "weight_svd",
+            "gora_max_rank": None,
+            "gora_min_rank": 1,
+            "gora_softmax_importance": False,
+            "gora_scale_by_lr": False,
+            "gora_lr": 1e-3,
+            "gora_features_func": None,
+            "gora_temperature": 0.5,
+            "gora_rank_stablize": False,
+            "gora_dynamic_scaling": False,
+            "gora_allocate_stretagy": "moderate",
+            "gora_scale_importance": False,
+            "gora_importance_type": "union_frobenius_norm",
+            "gora_stable_gemma": 0.02,
         },
         "checkpoint": {
             "dir_name": "checkpoints",

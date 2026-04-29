@@ -1,20 +1,30 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional
 
 import torch
 from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
+from src.prompts import DEFAULT_GSM8K_INSTRUCTION_TEMPLATE
 from src.utils import ensure_dir
 from src.distributed import is_distributed, get_rank, get_world_size
 
 
 GSM8K_DATASET_NAME = "gsm8k"
 GSM8K_CONFIG_NAME = "main"
+
+
+def apply_four_shot_cot_prompt(config: Mapping[str, Any]) -> MutableMapping[str, Any]:
+    config_with_prompt = deepcopy(dict(config))
+    data_config = dict(config_with_prompt.get("data", {}) or {})
+    data_config["instruction_template"] = DEFAULT_GSM8K_INSTRUCTION_TEMPLATE
+    config_with_prompt["data"] = data_config
+    return config_with_prompt
 
 
 def extract_reference_answer(answer_text: str) -> str:
@@ -28,7 +38,7 @@ def build_instruction_text(example: Mapping[str, Any], config: Mapping[str, Any]
     question = str(example["question"]).strip()
     template = config.get(
         "instruction_template",
-        "Solve the following math word problem. Show your reasoning before giving the final answer.\n\nQuestion: {question}",
+        DEFAULT_GSM8K_INSTRUCTION_TEMPLATE,
     )
     return template.format(question=question)
 

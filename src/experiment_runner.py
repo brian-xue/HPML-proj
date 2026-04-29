@@ -7,7 +7,6 @@ from src.utils import (
     count_parameters,
     deep_update,
     default_config,
-    format_metrics,
     load_json,
     list_versioned_run_dirs,
     load_config,
@@ -133,16 +132,15 @@ def _validate_supported_features(config, experiment_name):
     execution_mode = str(execution_cfg.get("mode", "single_gpu")).lower()
     if execution_mode not in {"single_gpu", "ddp", "fsdp"}:
         raise ExperimentNotImplementedError(
-            f"Experiment '{experiment_name}' requests unsupported execution.mode '{
-                execution_mode}'."
+            f"Experiment {experiment_name} requests unsupported execution.mode "
+            "'{execution_mode}'."
         )
 
     training_cfg = config.get("training", {}) or {}
     runtime_cfg = config.get("runtime", {}) or {}
     if training_cfg.get("gradient_checkpointing", False) or runtime_cfg.get("gradient_checkpointing", False):
         raise ExperimentNotImplementedError(
-            f"Experiment '{
-                experiment_name}' requests gradient checkpointing, but it is not implemented yet."
+            f"Experiment '{experiment_name}' requests gradient checkpointing, but it is not implemented yet."
         )
 
 
@@ -241,8 +239,8 @@ def run_experiment(exp, dry_run=False):
     if device_config:
         device_config_path = (PROJECT_ROOT / device_config).resolve()
         if not device_config_path.exists():
-            raise FileNotFoundError(f"device_config not found: {
-                                    device_config_path}")
+            raise FileNotFoundError(
+                f"device_config not found: {device_config_path}")
 
     bootstrap_config = load_effective_config(
         base_config_path=base_config_path,
@@ -338,8 +336,8 @@ def run_experiment(exp, dry_run=False):
         rank_suffix = f".rank{dist.get_rank()}"
         if not is_main_process():
             filename = f"run{rank_suffix}.log"
-    logger = setup_logger(f"experiment.{name}.{Path(run_dir).name}{
-                          rank_suffix}", output_dir=run_dir, filename=filename)
+    logger = setup_logger(
+        f"experiment.{name}.{Path(run_dir).name}{rank_suffix}", output_dir=run_dir, filename=filename)
     if exp.get("description"):
         logger.info("Description: %s", exp.get("description"))
     logger.info("Starting experiment '%s' (%s) at %s",

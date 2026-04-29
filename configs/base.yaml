@@ -104,7 +104,7 @@ data:
 dataloader:
   # Training and evaluation batch sizes for the shared setup layer.
   train_batch_size: 8
-  eval_batch_size: 8
+  eval_batch_size: 256
 
   # DataLoader worker settings.
   num_workers: 0
@@ -114,7 +114,7 @@ optimizer:
   # The current shared training setup initializes AdamW only.
   # If other optimizers are added later, this field can become a selector.
   name: adamw
-  lr: 2.0e-5
+  lr: 1.0e-4
   weight_decay: 0.01
   betas: [0.9, 0.999]
   eps: 1.0e-8

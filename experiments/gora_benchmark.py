@@ -21,15 +21,15 @@ EXPERIMENT = {
     "artifacts": {"results_filename": "final_results.json", "save_eval_metrics_json": False},
     "overrides": {
         "training": {
-            "num_epochs": 1,
-            "max_steps": 1000,
+            "num_epochs": 3,
+            "max_steps": 3000,
             "log_every_steps": 10,
-            "eval_every_steps": 200,
-            "save_every_steps": 200,
+            "eval_every_steps": 2000,
+            "save_every_steps": 2000,
             "save_at_end": True,
         },
-        "dataloader": {"train_batch_size": 4, "eval_batch_size": 4},
-        "optimizer": {"lr": 2.0e-4, "weight_decay": 0.0},
+        "dataloader": {"train_batch_size": 8, "eval_batch_size": 256},
+        "optimizer": {"lr": 1.0e-4, "weight_decay": 0.0},
         "data": {"max_length": 512, "num_preprocessing_workers": 1},
         "peft": {
             "enabled": True,

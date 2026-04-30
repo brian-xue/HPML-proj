@@ -482,6 +482,11 @@ def apply_peft_to_model(
                 peft_config.get("modules_to_save")),
         )
         wrapped_model = get_peft_model(model, lora_config)
+        if not bool(peft_config.get("run_lora_in_fp32", False)):
+            base_model_dtype = next(model.parameters()).dtype
+            for param in wrapped_model.parameters():
+                if getattr(param, "requires_grad", False) and param.dtype != base_model_dtype:
+                    param.data = param.data.to(base_model_dtype)
         metadata = build_lora_metadata(
             peft_config=peft_config,
             resolved_target_modules=resolved_target_modules,

@@ -1,313 +1,300 @@
-# Shared LLM Fine-Tuning Core
+# Training Efficiency Comparisons for LLM Fine-Tuning
 
-This project now includes the shared implementation core for GSM8K-style math reasoning fine-tuning and evaluation using `Qwen/Qwen2.5-1.5B-Instruct`, PyTorch, Hugging Face Transformers, and Hugging Face Datasets.
+**Songchen Xue · Sanchit Sahay · Sruthi Raghavan**
 
-## What Was Implemented
+---
 
-The current work focuses only on the reusable foundation that all later experiment paths can build on.
+## 1. Project Overview
 
-Included:
+Fine-tuning large language models (LLMs) requires significant GPU memory and compute resources, making it difficult to deploy under limited hardware constraints.
 
-- Shared utilities for configuration, logging, seeding, output directories, run naming, and small helper functions
-- A reusable GSM8K data pipeline with deterministic splitting, instruction-response formatting, tokenization, dataloaders, and a causal language modeling collator
-- Shared model and tokenizer loading with config-driven dtype and device handling
-- Lightweight runtime measurement utilities for timing, throughput, and GPU memory tracking
-- Shared evaluation logic for batched text generation, answer extraction, exact-match accuracy, and metric aggregation
-- Shared checkpoint save/load utilities with metadata handling and best-checkpoint support
-- Thin orchestration scripts for data preparation, training setup, evaluation, and result summarization
+This project builds a reproducible benchmarking framework to compare multiple fine-tuning strategies under constrained environments. We focus on both system efficiency and model performance, with experiments around:
 
-Not included yet:
+* **LoRA**
+* **QLoRA (4-bit quantization)**
+* **GoRA (gradient-based low-rank adaptation)**
+* **Gradient Checkpointing**
+* **Distributed scaling (DDP vs FSDP)**
 
-- Distributed training logic
-- Advanced profiler integrations
-- Trainer subclasses for single-device or distributed execution
+**Dataset:** GSM8K  
+**Model:** Qwen2.5-1.5B-Instruct
 
-## Files Added
+---
 
-### `src/utils.py`
+## 2. Repository Structure
 
-Provides lightweight project-wide helpers:
-
-- random seed setup for `random`, `numpy`, `torch`, and CUDA
-- logger creation for console and file output
-- config load/save helpers for YAML and JSON
-- output directory creation
-- run name generation from config
-- metric formatting
-- device, parameter counting, and batch movement helpers
-- a default shared config structure
-
-### `src/data.py`
-
-Implements the shared GSM8K dataset pipeline:
-
-- loading GSM8K from Hugging Face
-- optional loading from a previously saved disk dataset
-- deterministic train/validation split creation when needed
-- formatting examples into a Qwen chat-style instruction/response structure
-- tokenization with truncation and label masking for causal LM fine-tuning
-- PyTorch dataloader builders for both training and generation-based evaluation
-- a reusable causal LM collator
-
-### `src/model.py`
-
-Provides model and tokenizer loading:
-
-- tokenizer loading for `Qwen/Qwen2.5-1.5B-Instruct`
-- pad token and padding-side handling
-- config-driven dtype selection for `fp32`, `fp16`, and `bf16`
-- model loading and movement to the configured device
-- a single helper to rebuild model, tokenizer, and device together
-
-### `src/metrics.py`
-
-Implements lightweight shared runtime measurements:
-
-- wall-clock timing
-- per-step timing and average step time
-- total runtime
-- samples/sec and tokens/sec
-- current allocated GPU memory
-- reserved GPU memory
-- peak allocated GPU memory
-
-### `src/evaluator.py`
-
-Implements reusable GSM8K evaluation logic:
-
-- batched generation for decoder-only models
-- answer extraction from generated text
-- exact-match comparison against GSM8K references
-- structured metric aggregation
-- runtime measurement integration
-
-### `src/checkpoint.py`
-
-Implements shared checkpoint handling:
-
-- saving model state
-- saving optimizer state
-- saving scheduler state
-- saving metadata such as epoch and global step
-- loading checkpoints for resume or evaluation
-- tracking and copying the best checkpoint by metric
-- storing a latest-checkpoint pointer for resumable runs
-
-### `src/peft.py`
-
-Implements shared PEFT support:
-
-- config-driven LoRA wrapping via `peft`
-- custom GoRA layer replacement and gradient-driven rank initialization
-- auto-detection of target projection layers for Qwen-style models
-- support for explicit fixed `target_modules`
-- resolved target-module reporting for reproducible follow-up runs
-- trainable vs total parameter summaries
-
-## Scripts Added
-
-### `scripts/prepare_data.py`
-
-Standalone data preparation script that:
-
-- loads GSM8K
-- preprocesses examples into the shared instruction-response format
-- optionally tokenizes data
-- saves processed outputs under `data/processed`
-
-### `scripts/train.py`
-
-Thin shared training setup script that:
-
-- loads config
-- sets the random seed
-- creates an output directory
-- loads model and tokenizer
-- builds dataloaders
-- initializes optimizer and scheduler
-
-This script does not implement a training loop. It is only the shared setup layer for future trainer-specific paths.
-
-### `scripts/eval.py`
-
-Standalone evaluation script that:
-
-- loads config
-- rebuilds model and tokenizer
-- restores a checkpoint
-- prepares evaluation data
-- runs shared generation-based evaluation
-- saves metrics to JSON
-
-### `scripts/eval_pretrained.py`
-
-Standalone pretrained baseline evaluation script that:
-
-- loads the same effective config stack as `experiments/lora_benchmark.py`
-- delegates model/dataloader/generation evaluation to `src.evaluator`
-- evaluates the base model without requiring a checkpoint
-- disables PEFT so the model remains pretrained-only
-- inherits the shared default 4-shot chain-of-thought prompt
-- supports quick subset runs with `--max-examples`
-- optionally fails when accuracy is below `--min-accuracy`
-- saves metrics and per-example predictions to JSON
-
-### `scripts/summarizing.py`
-
-Shared result summarization script that:
-
-- scans experiment directories for saved evaluation metrics
-- aggregates them into JSON and CSV
-- summarizes accuracy, runtime, throughput, and peak memory
-
-### `scripts/run_lora_benchmark.py`
-
-Main editable benchmark runner for full GSM8K LoRA experiments:
-
-- holds a top-level `EXPERIMENTS` Python list
-- supports explicit `new` or `resume` modes per experiment
-- creates versioned run directories such as `v001`, `v002`, ...
-- applies LoRA and saves the resolved target-layer list
-- runs full training, checkpointing, resume, and evaluation
-
-## Design Choices
-
-The implementation was kept intentionally simple and config-driven so later work can add PEFT, distributed execution, and trainer subclasses without major refactoring.
-
-Reusable logic lives in `src/`.
-Scripts in `scripts/` stay thin and orchestration-focused.
-The default model is consistently `Qwen/Qwen2.5-1.5B-Instruct`.
-LoRA target discovery is reproducible because the resolved target list is saved
-to each benchmark run and can be copied back into future explicit configs.
-
-## Validation
-
-The implemented files were checked with:
-
-```bash
-PYTHONPYCACHEPREFIX=/tmp/python_cache python3 -m compileall src scripts
+```text
+project-root/
+├── configs/
+│   ├── base.yaml
+│   ├── distributed/
+│   │   ├── single_gpu.yaml
+│   │   ├── ddp.yaml
+│   │   └── fsdp.yaml
+│   ├── hub.yaml
+│   └── profile.yaml
+├── experiments/
+│   ├── lora_benchmark.py
+│   ├── qlora_benchmark.py
+│   ├── gora_benchmark.py
+│   ├── gradient_checkpointing_benchmark.py
+│   ├── ddp_scaling.py
+│   ├── fsdp_scaling.py
+│   └── smoketest_benchmark.py
+├── scripts/
+│   ├── train.py
+│   ├── eval.py
+│   ├── eval_pretrained.py
+│   ├── prepare_data.py
+│   ├── summarizing.py
+│   ├── profile_ddp.sh
+│   ├── profile_fsdp.sh
+│   └── run_gpu_benchmarks.sh
+├── src/
+│   ├── experiment_runner.py
+│   ├── model.py
+│   ├── peft.py
+│   ├── data.py
+│   ├── evaluator.py
+│   ├── trainer_base.py
+│   ├── trainer_single.py
+│   ├── trainer_distributed.py
+│   ├── distributed.py
+│   ├── checkpoint.py
+│   ├── metrics.py
+│   ├── profiler.py
+│   ├── hub.py
+│   ├── prompts.py
+│   └── utils.py
+├── analysis
+└── README.md
 ```
 
-This passed successfully.
+Notes:
 
-## Smoke Test
+* `experiments/` contains the main benchmark entrypoints used in this repo.
+* `scripts/train.py` is a shared training setup entrypoint, but the benchmark runs are launched through `experiments/*.py`.
+* `visualization/` contains plotting and log-summary utilities.
 
-You can run a lightweight end-to-end smoke test to verify that the shared
-pipeline is wired correctly.
+---
 
-### 1. Install dependencies
+## 3. Setup
 
-```bash
-python3 -m pip install -r requirements.txt
-```
-
-### 2. Run the smoke test
+Install dependencies:
 
 ```bash
-python3 scripts/smoke_test.py
+pip install -r requirements.txt
 ```
 
-This script will:
+---
 
-- create a tiny synthetic GSM8K-style dataset locally
-- load a very small Hugging Face causal LM by default
-- run a short train pass through `src/trainer_base.py`
-- run shared generation-based evaluation
-- save outputs under `output/smoke_test`
+## 4. How to Run
 
-### 3. Optional overrides
-
-To explicitly choose the tiny model or change the output directory:
-
-```bash
-python3 scripts/smoke_test.py \
-  --model-name sshleifer/tiny-gpt2 \
-  --output-dir output/smoke_test
-```
-
-### 4. What to check after it finishes
-
-If the smoke test succeeds, you should see:
-
-- `output/smoke_test/smoke_test_results.json`
-- `output/smoke_test/run.log`
-- `output/smoke_test/checkpoints/`
-- `output/smoke_test/synthetic_gsm8k/`
-
-### Notes
-
-- The smoke test defaults to the project model (see `configs/base.yaml`), but you can
-  override `--model-name` to use something smaller (e.g. `sshleifer/tiny-gpt2`) for a quicker wiring check.
-- The smoke test still requires network access the first time so Transformers
-  can download the model.
-- This is only a wiring/integration check, not a meaningful training run.
-
-## Benchmark Runs
-
-Benchmark experiments are intended to be run as standalone Python entrypoints under `experiments/`.
-
-Run the LoRA benchmark:
+### 4.1 LoRA Benchmark
 
 ```bash
 python3 experiments/lora_benchmark.py
 ```
 
-## Pretrained Accuracy Baseline
-
-Evaluate the configured base model before fine-tuning using the LoRA benchmark
-eval settings and 4-shot chain-of-thought prompting:
-
-```bash
-python3 scripts/eval_pretrained.py --max-examples 100
-```
-
-To use it as a pass/fail eval test, add a threshold:
-
-```bash
-python3 scripts/eval_pretrained.py --max-examples 100 --min-accuracy 0.10
-```
-
-Dry-run (validate and print the resolved output directory without training):
+Dry-run:
 
 ```bash
 python3 experiments/lora_benchmark.py --dry-run
 ```
 
-Each run writes a versioned directory under the experiment name, for example:
+### 4.2 QLoRA Benchmark
 
-- `output/lora_benchmark/v001/`
-- `output/lora_benchmark/v002/`
+```bash
+python3 experiments/qlora_benchmark.py
+```
 
-Important run artifacts:
+Dry-run:
 
-- `config.yaml`
-- `resolved_peft_config.json`
-- `final_results.json`
-- `checkpoints/`
-- `run.log`
+```bash
+python3 experiments/qlora_benchmark.py --dry-run
+```
 
-When LoRA auto-detect mode is used, the resolved LoRA target list is:
+### 4.3 GoRA Benchmark
 
-- printed to the console and run log
-- saved in `resolved_peft_config.json`
-- written back into `config.yaml`
+```bash
+python3 experiments/gora_benchmark.py
+```
 
-That saved `target_modules` list is meant to be copied into future experiments
-to lock the setting for reproducible benchmarks.
+Dry-run:
 
-To resume an unfinished run, set the experiment spec `run.mode: resume` and
-optionally set `run.resume_version` to `latest` or a specific `v###`.
+```bash
+python3 experiments/gora_benchmark.py --dry-run
+```
 
-### Backwards compatibility
+### 4.4 Gradient Checkpointing Benchmark
 
-`scripts/run_lora_benchmark.py` still exists as a deprecated wrapper that runs
-`experiments/lora_benchmark.py`.
+```bash
+python3 experiments/gradient_checkpointing_benchmark.py
+```
 
-## Next Steps
+### 4.5 Smoke Test
 
-The codebase is now ready for the next layer of work, such as:
+```bash
+python3 experiments/smoketest_benchmark.py
+```
 
-- implementing the actual shared training loop base
-- adding trainer subclasses for single-device and distributed paths
-- adding additional PEFT methods (QLoRA, GoRA)
-- adding more advanced profiling and experiment tracking
+### 4.6 DDP Scaling
+
+```bash
+torchrun --standalone --nproc_per_node=4 experiments/ddp_scaling.py --max-steps 500
+```
+
+### 4.7 FSDP Scaling
+
+```bash
+torchrun --standalone --nproc_per_node=4 experiments/fsdp_scaling.py --max-steps 500
+```
+
+### 4.8 Profiling Wrappers
+
+```bash
+bash scripts/profile_ddp.sh 4
+bash scripts/profile_fsdp.sh 4
+```
+
+### 4.9 Standalone Evaluation
+
+Evaluate a checkpointed model:
+
+```bash
+python3 scripts/eval.py --checkpoint /path/to/checkpoint
+```
+
+Evaluate the pretrained base model:
+
+```bash
+python3 scripts/eval_pretrained.py --max-examples 100
+```
+
+### 4.10 Log Summaries and Visualization
+
+Summarize saved evaluation metrics:
+
+```bash
+python3 scripts/summarizing.py
+```
+
+Summarize GoRA vs LoRA runtime logs:
+
+```bash
+python3 visualization/summarize_gora_lora_runtime.py
+```
+
+Plot run3/run4 loss and eval accuracy:
+
+```bash
+python3 visualization/plot_run3_run4_loss_acc.py
+```
+
+---
+
+## 5. Outputs
+
+Typical experiment runs write to versioned directories under:
+
+```text
+output/<experiment-name>/v###/
+```
+
+Common artifacts include:
+
+* `config.yaml`
+* `experiment.json`
+* `resolved_peft_config.json` when PEFT is enabled
+* `final_results.json`
+* `run.log`
+
+Visualization outputs are written under:
+
+```text
+visualization/outputs/
+```
+
+---
+
+## 6. Figures
+
+### 6.1 LoRA vs GoRA
+
+![LoRA vs GoRA loss](imgs/lora-vs-gora-loss.png)
+
+This plot compares the training loss trajectories of LoRA and GoRA across the benchmark run. LoRA converges faster, while GoRA shows more stable but slower optimization.
+
+![LoRA vs GoRA throughput](imgs/lora-vs-gora-throughput_by_step.png)
+
+This plot shows step-level throughput, illustrating the runtime efficiency gap between LoRA and GoRA.
+
+![Performance comparison: LoRA vs GoRA](imgs/performance-comparison-lora-vs-gora.png)
+
+This summary figure compares the overall performance characteristics of LoRA and GoRA.
+
+![NCU comparison: GoRA vs LoRA](imgs/ncu-gora-vs-lora.png)
+
+This profiler-based figure highlights kernel-level differences between GoRA and LoRA.
+
+### 6.2 QLoRA vs LoRA
+
+![QLoRA vs LoRA loss](imgs/qlora-vs-lora-loss.png)
+
+This plot compares optimization behavior between QLoRA and standard LoRA.
+
+![QLoRA vs LoRA memory](imgs/qlora-vs-lora-memory.png)
+
+This figure shows the GPU memory savings achieved by QLoRA relative to LoRA.
+
+### 6.3 Distributed FT
+
+This section groups the full fine-tuning and communication-related figures to highlight distributed training trade-offs.
+
+![Full fine-tuning vs PEFT](imgs/full-ft-vs-peft.png)
+
+This figure compares the overall efficiency trade-off between full fine-tuning and parameter-efficient fine-tuning methods.
+
+![Full fine-tuning DDP vs FSDP](imgs/full-ft-ddp-vs-fsdp.png)
+
+This figure highlights the scaling and systems trade-offs between DDP and FSDP for full fine-tuning workloads.
+
+![Communication and data movement](imgs/commuication-data-movement.png)
+
+This figure summarizes communication or memory-movement effects that help explain system-level efficiency differences.
+
+---
+
+## 7. Reproducibility
+
+This project is designed around reproducible experiment execution:
+
+* Config-driven setup
+* Versioned output directories
+* Structured logging
+* Shared evaluation utilities
+* Fixed random seeds where applicable
+
+---
+
+## Observations & Conclusions
+
+- System efficiency is largely determined by GPU utilization rather than raw model performance.
+
+- Improving utilization (e.g., via GoRA) can significantly boost throughput without increasing memory usage.
+
+- Memory optimization depends on the bottleneck:
+  - QLoRA → parameter-dominated memory
+  - Gradient Checkpointing → activation-dominated memory
+
+- Trade-offs across methods:
+  - QLoRA trades accuracy for memory (with slight speedup)
+  - Checkpointing trades efficiency for larger memory savings
+
+- GoRA achieves comparable performance to LoRA while improving throughput (~15%).
+
+- Lightweight PEFT methods enable practical fine-tuning under limited hardware constraints.
+
+- For distributed training:
+  - FSDP is preferred for full fine-tuning
+  - DDP is more efficient for PEFT

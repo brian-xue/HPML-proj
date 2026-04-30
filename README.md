@@ -75,6 +75,7 @@ Notes:
 * `experiments/` contains the main benchmark entrypoints used in this repo.
 * `scripts/train.py` is a shared training setup entrypoint, but the benchmark runs are launched through `experiments/*.py`.
 * `visualization/` contains plotting and log-summary utilities.
+* `analysis/` contains the NSight Systems SQL Queries and python script to generate GPU plots.
 
 ---
 
@@ -251,17 +252,17 @@ This figure shows the GPU memory savings achieved by QLoRA relative to LoRA.
 
 This section groups the full fine-tuning and communication-related figures to highlight distributed training trade-offs.
 
-![Full fine-tuning vs PEFT](imgs/full-ft-vs-peft.png)
+![Full fine-tuning vs PEFT](imgs/slide2_peft_vs_full_finetune.png)
 
 This figure compares the overall efficiency trade-off between full fine-tuning and parameter-efficient fine-tuning methods.
 
-![Full fine-tuning DDP vs FSDP](imgs/full-ft-ddp-vs-fsdp.png)
-
-This figure highlights the scaling and systems trade-offs between DDP and FSDP for full fine-tuning workloads.
-
-![Communication and data movement](imgs/commuication-data-movement.png)
+![Communication and data movement](imgs/slide2_profiler_regime_dependence.png)
 
 This figure summarizes communication or memory-movement effects that help explain system-level efficiency differences.
+
+![Full fine-tuning DDP vs FSDP](imgs/slide_1_final.png)
+
+This figure highlights the scaling and systems trade-offs between DDP and FSDP for full fine-tuning workloads.
 
 ---
 

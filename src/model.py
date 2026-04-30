@@ -55,13 +55,42 @@ def load_model(
     target_device = device or get_device(config.get("device"))
     cache_dir = config.get("cache_dir")
     local_files_only = bool(config.get("local_files_only", False))
+    trust_remote_code = bool(config.get("trust_remote_code", False))
+
+    if bool(config.get("qlora", False)):
+        try:
+            from transformers import BitsAndBytesConfig
+        except ImportError as exc:
+            raise ImportError(
+                "QLoRA loading requires transformers BitsAndBytes support. "
+                "Install compatible transformers/bitsandbytes packages to enable model.qlora=true."
+            ) from exc
+
+        compute_dtype = resolve_torch_dtype(config.get("qlora_compute_dtype")) or dtype or torch.bfloat16
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type=str(config.get("qlora_quant_type", "nf4")),
+            bnb_4bit_compute_dtype=compute_dtype,
+            bnb_4bit_use_double_quant=bool(config.get("qlora_use_double_quant", True)),
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+            quantization_config=quantization_config,
+            torch_dtype=dtype,
+            trust_remote_code=trust_remote_code,
+            device_map={"": str(target_device)} if target_device.type == "cuda" else None,
+        )
+        model.config.use_cache = bool(config.get("use_cache", True))
+        return model
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         cache_dir=cache_dir,
         local_files_only=local_files_only,
+        trust_remote_code=trust_remote_code,
         dtype=dtype,
-        trust_remote_code=bool(config.get("trust_remote_code", False)),
     )
     model.config.use_cache = bool(config.get("use_cache", True))
     model.to(target_device)

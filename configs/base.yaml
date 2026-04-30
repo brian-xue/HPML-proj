@@ -36,6 +36,12 @@ model:
   # Future training code can override this if needed.
   use_cache: true
 
+  # Optional QLoRA 4-bit loading. Leave false to preserve the standard path.
+  qlora: false
+  qlora_quant_type: nf4
+  qlora_compute_dtype: bf16
+  qlora_use_double_quant: true
+
   # Shared tokenizer defaults.
   padding_side: right
   truncation_side: right

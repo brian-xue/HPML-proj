@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 import torch
 import torch.nn.functional as F
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from torch import nn
 
 from src.utils import count_parameters, move_batch_to_device
@@ -417,6 +417,14 @@ def _build_gora_resolved_config(peft_config: Mapping[str, Any]) -> GoRAResolvedC
     )
 
 
+def _prepare_model_for_peft(model: nn.Module) -> nn.Module:
+    # When the base model is quantized for QLoRA-style training, PEFT expects
+    # the standard k-bit preparation pass before adapters are attached.
+    if getattr(model, "is_loaded_in_4bit", False):
+        return prepare_model_for_kbit_training(model)
+    return model
+
+
 def _apply_gora_to_model(
     model: nn.Module,
     peft_config: Mapping[str, Any],
@@ -464,6 +472,8 @@ def apply_peft_to_model(
         return model, {"enabled": False, **summarize_parameter_efficiency(model)}
 
     method = str(peft_config.get("method", "lora")).lower()
+    if method == "lora":
+        model = _prepare_model_for_peft(model)
     resolved_target_modules, matched_module_names, target_modules_source = _resolve_target_modules(
         model, peft_config)
     if not resolved_target_modules:

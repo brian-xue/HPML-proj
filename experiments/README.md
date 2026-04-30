@@ -33,6 +33,31 @@ python3 experiments/lora_benchmark.py --dry-run
 python3 experiments/gora_benchmark.py --dry-run
 ```
 
+## DDP/FSDP scaling (run with torchrun)
+
+DDP scaling (4 GPUs example):
+
+```bash
+torchrun --standalone --nproc_per_node=4 experiments/ddp_scaling.py --max-steps 500
+```
+
+FSDP scaling (4 GPUs example):
+
+```bash
+torchrun --standalone --nproc_per_node=4 experiments/fsdp_scaling.py --max-steps 500
+```
+
+Profiling wrappers (run plain + nsys + ncu if present):
+
+```bash
+bash scripts/profile_ddp.sh 4
+bash scripts/profile_fsdp.sh 4
+```
+
+These wrappers profile only a post-warmup training window rather than full
+startup. You can tune the window with `PROFILE_WARMUP_STEPS`,
+`PROFILE_ACTIVE_STEPS`, and `PROFILE_MAX_STEPS`.
+
 ## Output layout
 
 Runs write to versioned directories under `output/<experiment-name>/v###/`, for example:

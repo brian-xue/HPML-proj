@@ -10,6 +10,7 @@ import torch
 from src.checkpoint import get_latest_checkpoint_dir, load_checkpoint, maybe_save_best_checkpoint, save_checkpoint
 from src.evaluator import evaluate_generation
 from src.metrics import RuntimeTracker
+from src.profiler import CudaProfileWindow
 from src.model import resolve_torch_dtype
 from src.utils import format_metrics, move_batch_to_device
 
@@ -73,6 +74,7 @@ class BaseTrainer:
         self.logger = logger
         self.state = TrainerState()
         self.runtime = RuntimeTracker(device=device)
+        self.profiler = CudaProfileWindow(config=config, logger=logger)
         self._grad_accum_counter = 0
         self._log_interval_tokens = 0
         self._log_interval_step_time_s = 0.0
@@ -99,11 +101,13 @@ class BaseTrainer:
         if self.device.type != "cuda":
             return nullcontext()
 
-        autocast_dtype = resolve_torch_dtype(self.config.get("model", {}).get("dtype"))
+        autocast_dtype = resolve_torch_dtype(
+            self.config.get("model", {}).get("dtype"))
         if autocast_dtype is None or autocast_dtype == torch.float32:
             return nullcontext()
         if autocast_dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
-            raise RuntimeError("runtime.autocast=true with model.dtype=bf16 requires CUDA bf16 support.")
+            raise RuntimeError(
+                "runtime.autocast=true with model.dtype=bf16 requires CUDA bf16 support.")
 
         return torch.autocast(device_type="cuda", dtype=autocast_dtype)
 
@@ -116,12 +120,15 @@ class BaseTrainer:
             self.output_dir,
             dir_name=self.checkpoint_config.get("dir_name", "checkpoints"),
         )
+        save_trainable_only = bool(
+            self.checkpoint_config.get("save_trainable_only", False))
         metadata = load_checkpoint(
             checkpoint_dir=checkpoint_dir,
             model=self.model,
             optimizer=self.optimizer,
             scheduler=self.scheduler,
             map_location=self.device,
+            strict=not save_trainable_only,
         )
         self.load_state(metadata)
         self.logger.info("Resumed from checkpoint %s", checkpoint_dir)
@@ -139,18 +146,37 @@ class BaseTrainer:
         self.model.train()
         batch = move_batch_to_device(batch, self.device)
 
-        gradient_accumulation_steps = int(self.training_config.get("gradient_accumulation_steps", 1))
+        profile_cfg = self.config.get("profile", {}) or {}
+        nvtx_enabled = bool(profile_cfg.get(
+            "nvtx", False)) and self.device.type == "cuda" and torch.cuda.is_available()
+
+        gradient_accumulation_steps = int(
+            self.training_config.get("gradient_accumulation_steps", 1))
+
         with self._get_training_context():
+            if nvtx_enabled:
+                torch.cuda.nvtx.range_push("forward_loss")
             loss = self.compute_loss(batch)
+            if nvtx_enabled:
+                torch.cuda.nvtx.range_pop()
+
         scaled_loss = loss / gradient_accumulation_steps
+        if nvtx_enabled:
+            torch.cuda.nvtx.range_push("backward")
         scaled_loss.backward()
+        if nvtx_enabled:
+            torch.cuda.nvtx.range_pop()
         self._grad_accum_counter += 1
         self.state.micro_step += 1
         self.state.epoch_step += 1
 
         should_step = self._grad_accum_counter >= gradient_accumulation_steps
         if should_step:
+            if nvtx_enabled:
+                torch.cuda.nvtx.range_push("optimizer_step")
             self._perform_optimizer_step()
+            if nvtx_enabled:
+                torch.cuda.nvtx.range_pop()
 
         return {
             "loss": float(loss.detach().item()),
@@ -167,7 +193,12 @@ class BaseTrainer:
 
     def should_evaluate(self) -> bool:
         eval_every = int(self.training_config.get("eval_every_steps", 0))
-        return eval_every > 0 and self.state.global_step > 0 and self.state.global_step % eval_every == 0
+        return (
+            self.eval_dataset is not None
+            and eval_every > 0
+            and self.state.global_step > 0
+            and self.state.global_step % eval_every == 0
+        )
 
     def should_checkpoint(self) -> bool:
         save_every = int(self.training_config.get("save_every_steps", 0))
@@ -189,7 +220,8 @@ class BaseTrainer:
 
             self.runtime.start_step()
             step_metrics = self.training_step(batch)
-            step_time_s = self.runtime.end_step(samples=batch_size, tokens=token_count)
+            step_time_s = self.runtime.end_step(
+                samples=batch_size, tokens=token_count)
             self._log_interval_tokens += token_count
             self._log_interval_step_time_s += step_time_s
 
@@ -204,9 +236,12 @@ class BaseTrainer:
                 )
                 gpu_mem = None
                 if self.device.type == "cuda" and torch.cuda.is_available():
-                    gpu_mem = torch.cuda.memory_allocated(self.device) / (1024 ** 2)
-                    reserved_mem = torch.cuda.memory_reserved(self.device) / (1024 ** 2)
-                    max_gpu_mem = torch.cuda.max_memory_allocated(self.device) / (1024 ** 2)
+                    gpu_mem = torch.cuda.memory_allocated(
+                        self.device) / (1024 ** 2)
+                    reserved_mem = torch.cuda.memory_reserved(
+                        self.device) / (1024 ** 2)
+                    max_gpu_mem = torch.cuda.max_memory_allocated(
+                        self.device) / (1024 ** 2)
                     self.logger.info(
                         "epoch=%s step=%s %s",
                         epoch,
@@ -239,12 +274,21 @@ class BaseTrainer:
                 self._log_interval_tokens = 0
                 self._log_interval_step_time_s = 0.0
 
+            if step_metrics["optimizer_stepped"]:
+                self.profiler.maybe_start(self.state.global_step)
+                self.profiler.maybe_stop(self.state.global_step)
+
             if step_metrics["optimizer_stepped"] and self.should_evaluate():
                 eval_results = self.evaluate()
                 metrics = eval_results.get("metrics", {})
-                self.logger.info("step=%s eval=%s", self.state.global_step, format_metrics(metrics))
+                if metrics:
+                    self.logger.info(
+                        "step=%s eval=%s", self.state.global_step, format_metrics(metrics))
                 if self.should_checkpoint():
-                    self.maybe_checkpoint(metrics)
+                    if metrics:
+                        self.maybe_checkpoint(metrics)
+                    else:
+                        self.maybe_checkpoint()
             elif step_metrics["optimizer_stepped"] and self.should_checkpoint():
                 self.maybe_checkpoint()
 
@@ -277,9 +321,11 @@ class BaseTrainer:
             if self.state.best_metric_value is None:
                 should_update_best = True
             elif metric_mode == "max":
-                should_update_best = metric_value > float(self.state.best_metric_value)
+                should_update_best = metric_value > float(
+                    self.state.best_metric_value)
             else:
-                should_update_best = metric_value < float(self.state.best_metric_value)
+                should_update_best = metric_value < float(
+                    self.state.best_metric_value)
 
             if should_update_best:
                 self.state.best_metric_name = metric_name
@@ -294,6 +340,8 @@ class BaseTrainer:
             global_step=self.state.global_step,
             metadata=self.state.as_dict(),
             dir_name=dir_name,
+            save_trainable_only=bool(
+                self.checkpoint_config.get("save_trainable_only", False)),
         )
 
         if metric_value is None:
@@ -327,7 +375,8 @@ class BaseTrainer:
                 if self._grad_accum_counter > 0 and not self.should_stop():
                     self._perform_optimizer_step()
 
-                eval_results = self.evaluate() if self.eval_dataset is not None else {"metrics": {}}
+                eval_results = self.evaluate() if self.eval_dataset is not None else {
+                    "metrics": {}}
                 final_results["eval"] = eval_results
                 if self.training_config.get("save_at_end", True) or self.should_checkpoint():
                     self.maybe_checkpoint(eval_results.get("metrics", {}))
@@ -336,13 +385,16 @@ class BaseTrainer:
                     **train_metrics,
                     **eval_results.get("metrics", {}),
                 }
-                self.logger.info("epoch=%s summary=%s", epoch, format_metrics(summary))
+                self.logger.info("epoch=%s summary=%s", epoch,
+                                 format_metrics(summary))
                 self.state.epoch_step = 0
                 if self.should_stop():
                     break
         finally:
+            self.profiler.close()
             self.runtime.stop_run()
 
         final_results["runtime"] = self.runtime.summary()
         final_results["state"] = self.state.as_dict()
+        final_results["status"] = "completed"
         return final_results

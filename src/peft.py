@@ -57,8 +57,10 @@ def discover_lora_target_modules(model: torch.nn.Module) -> Tuple[List[str], Lis
             matched_by_leaf.setdefault(leaf_name, []).append(name)
 
     if matched_by_leaf:
-        target_modules = [name for name in PREFERRED_QWEN_TARGETS if name in matched_by_leaf]
-        matched_module_names = [full_name for leaf_name in target_modules for full_name in matched_by_leaf[leaf_name]]
+        target_modules = [
+            name for name in PREFERRED_QWEN_TARGETS if name in matched_by_leaf]
+        matched_module_names = [
+            full_name for leaf_name in target_modules for full_name in matched_by_leaf[leaf_name]]
         return target_modules, matched_module_names
 
     target_modules = sorted(
@@ -66,14 +68,16 @@ def discover_lora_target_modules(model: torch.nn.Module) -> Tuple[List[str], Lis
         for leaf_name in fallback_by_leaf
         if leaf_name not in EXCLUDED_MODULE_SUFFIXES and "head" not in leaf_name
     )
-    matched_module_names = [full_name for leaf_name in target_modules for full_name in fallback_by_leaf[leaf_name]]
+    matched_module_names = [
+        full_name for leaf_name in target_modules for full_name in fallback_by_leaf[leaf_name]]
     return target_modules, matched_module_names
 
 
 def summarize_parameter_efficiency(model: torch.nn.Module) -> Dict[str, Any]:
     total_parameters = count_parameters(model, trainable_only=False)
     trainable_parameters = count_parameters(model, trainable_only=True)
-    trainable_ratio = (trainable_parameters / total_parameters) if total_parameters else 0.0
+    trainable_ratio = (trainable_parameters /
+                       total_parameters) if total_parameters else 0.0
     return {
         "total_parameters": total_parameters,
         "trainable_parameters": trainable_parameters,
@@ -137,7 +141,8 @@ class GoRALinear(nn.Module):
         self.out_features = int(base_layer.out_features)
         self.avg_rank = int(config.rank)
         self.alpha = int(config.alpha)
-        self.dropout = nn.Dropout(float(config.dropout)) if float(config.dropout) > 0 else nn.Identity()
+        self.dropout = nn.Dropout(float(config.dropout)) if float(
+            config.dropout) > 0 else nn.Identity()
         self.init_method = str(config.init_method)
         self.weight_a_init_method = config.weight_a_init_method
         self.weight_b_init_method = config.weight_b_init_method
@@ -145,9 +150,11 @@ class GoRALinear(nn.Module):
         self.rank_stabilize = bool(config.rank_stabilize)
         self.dynamic_scaling = bool(config.dynamic_scaling)
 
-        self.weight = nn.Parameter(base_layer.weight.detach().clone(), requires_grad=False)
+        self.weight = nn.Parameter(
+            base_layer.weight.detach().clone(), requires_grad=False)
         if base_layer.bias is not None:
-            self.bias = nn.Parameter(base_layer.bias.detach().clone(), requires_grad=False)
+            self.bias = nn.Parameter(
+                base_layer.bias.detach().clone(), requires_grad=False)
         else:
             self.register_parameter("bias", None)
 
@@ -188,8 +195,10 @@ class GoRALinear(nn.Module):
 
         dtype = self._get_lora_dtype()
         device = self.weight.device
-        self.weight_a = nn.Parameter(torch.empty((rank, self.in_features), device=device, dtype=dtype))
-        self.weight_b = nn.Parameter(torch.empty((self.out_features, rank), device=device, dtype=dtype))
+        self.weight_a = nn.Parameter(torch.empty(
+            (rank, self.in_features), device=device, dtype=dtype))
+        self.weight_b = nn.Parameter(torch.empty(
+            (self.out_features, rank), device=device, dtype=dtype))
 
     def _init_weight(self, weight_name: str, method: str | None) -> None:
         weight = getattr(self, weight_name)
@@ -199,13 +208,15 @@ class GoRALinear(nn.Module):
             elif method == "normal":
                 nn.init.normal_(weight, mean=0.0, std=0.02)
             else:
-                nn.init.normal_(weight, mean=0.0, std=1 / (self.in_features**0.5))
+                nn.init.normal_(weight, mean=0.0, std=1 /
+                                (self.in_features**0.5))
             return
 
         if method == "kaiming":
             nn.init.kaiming_uniform_(weight, a=5**0.5)
         elif method in {"normal", "gaussian"}:
-            nn.init.normal_(weight, mean=0.0, std=0.02 if method == "normal" else 1 / max(self.active_rank, 1) ** 0.5)
+            nn.init.normal_(weight, mean=0.0, std=0.02 if method ==
+                            "normal" else 1 / max(self.active_rank, 1) ** 0.5)
         elif method == "orthogonal":
             nn.init.orthogonal_(weight)
         else:
@@ -220,7 +231,8 @@ class GoRALinear(nn.Module):
     def _compute_lora_weight(self) -> torch.Tensor:
         if self.active_rank <= 0:
             return torch.zeros_like(self.weight)
-        lora_weight = torch.matmul(self.weight_b.to(self._get_lora_dtype()), self.weight_a.to(self._get_lora_dtype()))
+        lora_weight = torch.matmul(self.weight_b.to(
+            self._get_lora_dtype()), self.weight_a.to(self._get_lora_dtype()))
         return (self.lora_scaler * lora_weight).to(self.weight.dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -229,7 +241,8 @@ class GoRALinear(nn.Module):
             return result
 
         dropped = self.dropout(x).to(self._get_lora_dtype())
-        lora_out = F.linear(F.linear(dropped, self.weight_a), self.weight_b).to(result.dtype)
+        lora_out = F.linear(F.linear(dropped, self.weight_a),
+                            self.weight_b).to(result.dtype)
         return result + self.lora_scaler * lora_out
 
     def reset_gradient_stats(self) -> None:
@@ -261,7 +274,8 @@ class GoRALinear(nn.Module):
         weight_b = u[:, :rank] @ torch.diag(sqrt_s)
         self.weight_a.data.copy_(weight_a.to(self.weight_a.dtype))
         self.weight_b.data.copy_(weight_b.to(self.weight_b.dtype))
-        self.weight.data.copy_((weight - self._compute_lora_weight().to(weight.dtype)).to(self.weight.dtype))
+        self.weight.data.copy_(
+            (weight - self._compute_lora_weight().to(weight.dtype)).to(self.weight.dtype))
 
     def grad_svd_init(self) -> None:
         grad = self.averaged_gradient()
@@ -300,7 +314,8 @@ class GoRALinear(nn.Module):
 
         a = self.weight_a.detach().to(torch.float32)
         ata = a @ a.T
-        ata_inv = torch.linalg.pinv(ata + 1e-8 * torch.eye(ata.shape[0], device=device, dtype=torch.float32))
+        ata_inv = torch.linalg.pinv(
+            ata + 1e-8 * torch.eye(ata.shape[0], device=device, dtype=torch.float32))
         a_pinv_right = a.T @ ata_inv
         weight_b = grad @ a_pinv_right
         scale = stable_gamma / max(float(self.alpha), 1e-8)
@@ -311,7 +326,8 @@ class GoRALinear(nn.Module):
         approx = self._compute_lora_weight().to(torch.float32)
         target = (-grad * lr) if lr > 0 else grad
         reconstruction_error = torch.norm(target - approx, p="fro")
-        relative_error = reconstruction_error / torch.clamp(torch.norm(target, p="fro"), min=1e-8)
+        relative_error = reconstruction_error / \
+            torch.clamp(torch.norm(target, p="fro"), min=1e-8)
         self.error.copy_(reconstruction_error.to(self.error.dtype))
         self.relative_error.copy_(relative_error.to(self.relative_error.dtype))
 
@@ -337,7 +353,8 @@ def _resolve_target_modules(
 ) -> tuple[List[str], List[str], str]:
     explicit_target_modules = peft_config.get("target_modules")
     if explicit_target_modules:
-        resolved_target_modules = [str(item) for item in explicit_target_modules]
+        resolved_target_modules = [str(item)
+                                   for item in explicit_target_modules]
         matched_module_names = []
         for name, _ in model.named_modules():
             if any(name.endswith(f".{leaf_name}") or name == leaf_name for leaf_name in resolved_target_modules):
@@ -347,7 +364,8 @@ def _resolve_target_modules(
     strategy = str(peft_config.get("target_modules_strategy", "auto")).lower()
     if strategy != "auto":
         raise ValueError(f"Unsupported target_modules_strategy: {strategy}")
-    resolved_target_modules, matched_module_names = discover_lora_target_modules(model)
+    resolved_target_modules, matched_module_names = discover_lora_target_modules(
+        model)
     return resolved_target_modules, matched_module_names, "auto"
 
 
@@ -374,19 +392,25 @@ def _build_gora_resolved_config(peft_config: Mapping[str, Any]) -> GoRAResolvedC
         run_in_fp32=bool(peft_config.get("run_lora_in_fp32", False)),
         rank_stabilize=bool(peft_config.get("gora_rank_stablize", False)),
         dynamic_scaling=bool(peft_config.get("gora_dynamic_scaling", False)),
-        importance_type=str(peft_config.get("gora_importance_type", "union_frobenius_norm")),
+        importance_type=str(peft_config.get(
+            "gora_importance_type", "union_frobenius_norm")),
         scale_importance=bool(peft_config.get("gora_scale_importance", False)),
         temperature=float(peft_config.get("gora_temperature", 0.5)),
-        softmax_importance=bool(peft_config.get("gora_softmax_importance", False)),
-        allocate_strategy=str(peft_config.get("gora_allocate_stretagy", "moderate")),
+        softmax_importance=bool(peft_config.get(
+            "gora_softmax_importance", False)),
+        allocate_strategy=str(peft_config.get(
+            "gora_allocate_stretagy", "moderate")),
         features_func=peft_config.get("gora_features_func"),
         min_rank=int(peft_config.get("gora_min_rank", 1)),
-        max_rank=(None if peft_config.get("gora_max_rank") is None else int(peft_config.get("gora_max_rank"))),
+        max_rank=(None if peft_config.get("gora_max_rank")
+                  is None else int(peft_config.get("gora_max_rank"))),
         stable_gamma=float(peft_config.get("gora_stable_gemma", 0.02)),
         lr=float(peft_config.get("gora_lr", 1e-3)),
-        gradient_estimation_steps=int(peft_config.get("gradient_estimation_steps", 8)),
+        gradient_estimation_steps=int(
+            peft_config.get("gradient_estimation_steps", 8)),
         rank_pattern=(
-            {str(k): int(v) for k, v in dict(peft_config.get("rank_pattern")).items()}
+            {str(k): int(v)
+             for k, v in dict(peft_config.get("rank_pattern")).items()}
             if peft_config.get("rank_pattern")
             else None
         ),
@@ -410,7 +434,8 @@ def _apply_gora_to_model(
         if not _full_name_matches(full_name, resolved_target_modules):
             continue
         initial_rank = int(rank_pattern.get(full_name, 0))
-        gora_module = GoRALinear(module, config=gora_config, initial_rank=initial_rank)
+        gora_module = GoRALinear(
+            module, config=gora_config, initial_rank=initial_rank)
         _replace_module(model, full_name, gora_module)
         applied_names.append(full_name)
 
@@ -439,19 +464,22 @@ def apply_peft_to_model(
         return model, {"enabled": False, **summarize_parameter_efficiency(model)}
 
     method = str(peft_config.get("method", "lora")).lower()
-    resolved_target_modules, matched_module_names, target_modules_source = _resolve_target_modules(model, peft_config)
+    resolved_target_modules, matched_module_names, target_modules_source = _resolve_target_modules(
+        model, peft_config)
     if not resolved_target_modules:
         raise ValueError("No PEFT target modules were resolved for the model.")
 
     if method == "lora":
         lora_config = LoraConfig(
-            task_type=getattr(TaskType, str(peft_config.get("task_type", "CAUSAL_LM")).upper()),
+            task_type=getattr(TaskType, str(
+                peft_config.get("task_type", "CAUSAL_LM")).upper()),
             r=int(peft_config.get("r", 16)),
             lora_alpha=int(peft_config.get("lora_alpha", 32)),
             lora_dropout=float(peft_config.get("lora_dropout", 0.05)),
             bias=str(peft_config.get("bias", "none")),
             target_modules=list(resolved_target_modules),
-            modules_to_save=_normalize_modules_to_save(peft_config.get("modules_to_save")),
+            modules_to_save=_normalize_modules_to_save(
+                peft_config.get("modules_to_save")),
         )
         wrapped_model = get_peft_model(model, lora_config)
         metadata = build_lora_metadata(
@@ -520,7 +548,8 @@ def _compute_gora_importance(
     if importance_type == "grad_entropy":
         flat = grad.flatten()
         sigma = torch.clamp(torch.std(flat), min=1e-8)
-        entropy = torch.log(sigma) + 0.5 * (torch.log(torch.tensor(2 * torch.pi, device=grad.device)) + 1)
+        entropy = torch.log(
+            sigma) + 0.5 * (torch.log(torch.tensor(2 * torch.pi, device=grad.device)) + 1)
         return maybe_scale(float(entropy.item()))
     if importance_type == "union_mean_grad_nuc_norm":
         return maybe_scale(
@@ -570,7 +599,8 @@ def _allocate_gora_ranks(
     peft_config: Mapping[str, Any],
 ) -> tuple[Dict[str, int], Dict[str, float | tuple[float, float]], int, int]:
     gora_config = _build_gora_resolved_config(peft_config)
-    target_modules = [(name, module) for name, module in model.named_modules() if isinstance(module, GoRALinear)]
+    target_modules = [(name, module) for name, module in model.named_modules(
+    ) if isinstance(module, GoRALinear)]
     if not target_modules:
         return {}, {}, 0, 0
 
@@ -604,7 +634,8 @@ def _allocate_gora_ranks(
 
     first_component: List[float] = []
     second_component: List[float] = []
-    has_tuple = any(isinstance(value, tuple) for value in named_importances.values())
+    has_tuple = any(isinstance(value, tuple)
+                    for value in named_importances.values())
     if has_tuple:
         for value in named_importances.values():
             if isinstance(value, tuple):
@@ -632,10 +663,12 @@ def _allocate_gora_ranks(
     named_ranks: Dict[str, int] = {}
     actual_trainable = 0
     for name, normalized_importance in zip(named_importances.keys(), normalized):
-        smooth_trainable = allocate_func(smooth_total_budget * float(normalized_importance.item()))
+        smooth_trainable = allocate_func(
+            smooth_total_budget * float(normalized_importance.item()))
         smooth_features = max(named_smooth_features[name], 1.0)
         rank = int(smooth_trainable // smooth_features)
-        max_rank = min(named_features[name], gora_config.max_rank) if gora_config.max_rank is not None else named_features[name]
+        max_rank = min(
+            named_features[name], gora_config.max_rank) if gora_config.max_rank is not None else named_features[name]
         rank = min(max(rank, gora_config.min_rank), max_rank)
         named_ranks[name] = rank
         actual_trainable += rank * named_features[name]
@@ -656,7 +689,8 @@ def initialize_gora(
             "gradient_estimation_steps": gora_config.gradient_estimation_steps,
         }
 
-    target_modules = [(name, module) for name, module in model.named_modules() if isinstance(module, GoRALinear)]
+    target_modules = [(name, module) for name, module in model.named_modules(
+    ) if isinstance(module, GoRALinear)]
     if not target_modules:
         return {"rank_pattern": {}, "gradient_estimation_steps": gora_config.gradient_estimation_steps}
 
@@ -682,7 +716,8 @@ def initialize_gora(
             module.weight.grad = None
         model.zero_grad(set_to_none=True)
 
-    named_ranks, named_importances, total_budget, actual_trainable = _allocate_gora_ranks(model, peft_config)
+    named_ranks, named_importances, total_budget, actual_trainable = _allocate_gora_ranks(
+        model, peft_config)
     for name, module in target_modules:
         module.weight.requires_grad = False
         module.dynamic_init(

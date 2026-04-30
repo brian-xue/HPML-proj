@@ -8,9 +8,11 @@ from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional
 import torch
 from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from src.prompts import DEFAULT_GSM8K_INSTRUCTION_TEMPLATE
 from src.utils import ensure_dir
+from src.distributed import is_distributed, get_rank, get_world_size
 
 
 GSM8K_DATASET_NAME = "gsm8k"
@@ -217,6 +219,7 @@ def build_dataloader(
     tokenizer: Any,
     batch_size: int,
     shuffle: bool,
+    sampler: Any = None,
     num_workers: int = 0,
     pin_memory: bool = True,
 ) -> DataLoader:
@@ -224,7 +227,8 @@ def build_dataloader(
     return DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
+        shuffle=shuffle if sampler is None else False,
+        sampler=sampler,
         num_workers=num_workers,
         pin_memory=pin_memory and torch.cuda.is_available(),
         collate_fn=collator,
@@ -264,24 +268,48 @@ def build_dataloaders(
     train_split = data_config.get("train_split", "train")
     eval_split = data_config.get("eval_split", "validation")
 
-    loaders = {
-        "train": build_dataloader(
-            processed[train_split],
+    loaders: Dict[str, Any] = {}
+
+    train_dataset = processed[train_split]
+    train_sampler = None
+    distributed_cfg = config.get("distributed", {}) or {}
+    if distributed_cfg.get("enabled", False) and is_distributed():
+        train_sampler = DistributedSampler(
+            train_dataset,
+            num_replicas=get_world_size(),
+            rank=get_rank(),
+            shuffle=True,
+            seed=int(config.get("seed", 42)),
+            drop_last=False,
+        )
+        loaders["train"] = build_dataloader(
+            train_dataset,
+            tokenizer=tokenizer,
+            batch_size=int(dataloader_config.get("train_batch_size", 4)),
+            shuffle=False,
+            sampler=train_sampler,
+            num_workers=int(dataloader_config.get("num_workers", 0)),
+            pin_memory=bool(dataloader_config.get("pin_memory", True)),
+        )
+    else:
+        loaders["train"] = build_dataloader(
+            train_dataset,
             tokenizer=tokenizer,
             batch_size=int(dataloader_config.get("train_batch_size", 4)),
             shuffle=True,
+            sampler=None,
             num_workers=int(dataloader_config.get("num_workers", 0)),
             pin_memory=bool(dataloader_config.get("pin_memory", True)),
-        ),
-        "eval": build_dataloader(
-            processed[eval_split],
-            tokenizer=tokenizer,
-            batch_size=int(dataloader_config.get("eval_batch_size", 4)),
-            shuffle=False,
-            num_workers=int(dataloader_config.get("num_workers", 0)),
-            pin_memory=bool(dataloader_config.get("pin_memory", True)),
-        ),
-    }
+        )
+
+    loaders["eval"] = build_dataloader(
+        processed[eval_split],
+        tokenizer=tokenizer,
+        batch_size=int(dataloader_config.get("eval_batch_size", 4)),
+        shuffle=False,
+        num_workers=int(dataloader_config.get("num_workers", 0)),
+        pin_memory=bool(dataloader_config.get("pin_memory", True)),
+    )
 
     if include_generation_eval:
         loaders["eval_generation"] = build_generation_dataloader(
@@ -291,6 +319,8 @@ def build_dataloaders(
             num_workers=int(dataloader_config.get("num_workers", 0)),
         )
 
+    if train_sampler is not None:
+        loaders["train_sampler"] = train_sampler
     return loaders
 
 

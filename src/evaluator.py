@@ -7,7 +7,7 @@ import torch
 
 from src.data import build_generation_dataloader
 from src.metrics import RuntimeTracker
-from src.utils import move_batch_to_device
+from src.utils import move_batch_to_device, unwrap_model
 
 
 NUMBER_PATTERN = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
@@ -60,7 +60,8 @@ def evaluate_generation(
 ) -> Dict[str, Any]:
     generation_config = config.get("generation", {})
     dataloader_config = config.get("dataloader", {})
-    target_device = device or next(model.parameters()).device
+    generation_model = unwrap_model(model)
+    target_device = device or next(generation_model.parameters()).device
 
     dataloader = build_generation_dataloader(
         dataset,
@@ -73,6 +74,7 @@ def evaluate_generation(
     tracker.start_run()
 
     model.eval()
+    generation_model.eval()
     predictions: List[Dict[str, Any]] = []
     correct = 0
     total = 0
@@ -92,7 +94,7 @@ def evaluate_generation(
             encoded = move_batch_to_device(encoded, target_device)
 
             tracker.start_step()
-            generated = model.generate(
+            generated = generation_model.generate(
                 **encoded,
                 max_new_tokens=int(generation_config.get("max_new_tokens", 128)),
                 do_sample=bool(generation_config.get("do_sample", False)),

@@ -29,8 +29,12 @@ def resolve_torch_dtype(dtype_name: str | None) -> Optional[torch.dtype]:
 
 def load_tokenizer(config: Mapping[str, Any]) -> Any:
     model_name = config.get("name", DEFAULT_MODEL_NAME)
+    cache_dir = config.get("cache_dir")
+    local_files_only = bool(config.get("local_files_only", False))
     tokenizer = AutoTokenizer.from_pretrained(
         model_name,
+        cache_dir=cache_dir,
+        local_files_only=local_files_only,
         trust_remote_code=bool(config.get("trust_remote_code", False)),
         use_fast=True,
     )
@@ -49,10 +53,14 @@ def load_model(
     model_name = config.get("name", DEFAULT_MODEL_NAME)
     dtype = resolve_torch_dtype(config.get("dtype"))
     target_device = device or get_device(config.get("device"))
+    cache_dir = config.get("cache_dir")
+    local_files_only = bool(config.get("local_files_only", False))
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=dtype,
+        cache_dir=cache_dir,
+        local_files_only=local_files_only,
+        dtype=dtype,
         trust_remote_code=bool(config.get("trust_remote_code", False)),
     )
     model.config.use_cache = bool(config.get("use_cache", True))

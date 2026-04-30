@@ -22,6 +22,13 @@ model:
   # Leave null to auto-select cuda, then mps, then cpu.
   device: null
 
+  # Hugging Face cache directory for model weights and tokenizer files.
+  # Once populated, later runs reuse these files instead of re-downloading.
+  cache_dir: data/model_cache
+
+  # Set true to require the model/tokenizer to already exist in cache.
+  local_files_only: false
+
   # Keep false unless a future model choice explicitly requires remote code.
   trust_remote_code: false
 

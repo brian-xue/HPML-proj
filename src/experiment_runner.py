@@ -60,7 +60,7 @@ def is_completed_run(run_dir, results_filename="final_results.json"):
         return False
     if str(results.get("status", "")).lower() == "completed":
         return True
-    return True
+    return False
 
 
 def resolve_auto_run_state(output_root, experiment_name, results_filename="final_results.json"):
@@ -123,8 +123,8 @@ def _validate_supported_features(config, experiment_name):
         method = str(peft_cfg.get("method", "lora")).lower()
         if method not in {"lora", "gora"}:
             raise ExperimentNotImplementedError(
-                f"Experiment '{experiment_name}' requests PEFT method"
-                "'{method}', but only 'lora' and 'gora' are implemented."
+                f"Experiment '{experiment_name}' requests PEFT method "
+                f"'{method}', but only 'lora' and 'gora' are implemented."
             )
 
     # DDP/FSDP are supported; keep this for future methods (pipeline parallel, etc).

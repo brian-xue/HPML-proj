@@ -153,14 +153,12 @@ class BaseTrainer:
         gradient_accumulation_steps = int(
             self.training_config.get("gradient_accumulation_steps", 1))
 
-        if nvtx_enabled:
-            torch.cuda.nvtx.range_push("forward_loss")
-        loss = self.compute_loss(batch)
-        if nvtx_enabled:
-            torch.cuda.nvtx.range_pop()
-
         with self._get_training_context():
+            if nvtx_enabled:
+                torch.cuda.nvtx.range_push("forward_loss")
             loss = self.compute_loss(batch)
+            if nvtx_enabled:
+                torch.cuda.nvtx.range_pop()
 
         scaled_loss = loss / gradient_accumulation_steps
         if nvtx_enabled:

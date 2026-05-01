@@ -264,6 +264,10 @@ This figure summarizes communication or memory-movement effects that help explai
 
 This figure highlights the scaling and systems trade-offs between DDP and FSDP for full fine-tuning workloads.
 
+![D2D Memory Moves DDP vs FSDP with FT and PEFT](imgs/combined_memory_timeline.png)
+
+This figure plots the average D2D activity for DDP and FSDP for full-fine tune and PEFT methods, they are grouped by 1 second long buckets.
+
 ---
 
 ## 7. Reproducibility
